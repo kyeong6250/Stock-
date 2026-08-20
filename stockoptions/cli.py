@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from stockoptions import __version__
+from stockoptions.analysis import screen_ticker
 from stockoptions.backtest import backtest
 from stockoptions.blackscholes import NoArbitrageViolation
 from stockoptions.data import (
@@ -18,13 +19,11 @@ from stockoptions.data import (
     get_current_price,
     get_dividend_yield,
     get_option_chain,
-    get_option_expirations,
     get_price_history,
     years_to_expiration,
 )
 from stockoptions.rates import get_yield_curve, risk_free_rate
 from stockoptions.strategies import breakevens, iron_condor, max_loss, max_profit, strangle, vertical_spread
-from stockoptions.volatility import historical_volatility
 
 console = Console()
 
@@ -80,23 +79,20 @@ def cmd_screen(args: argparse.Namespace) -> None:
     yield_curve = get_yield_curve()  # fetch once, reuse (maturity-interpolated) for every ticker below
 
     for ticker in args.tickers:
-        S = get_current_price(ticker)
-        history = get_price_history(ticker, period="3mo")
-        hv = historical_volatility(history["Close"], window=30)
-
-        expirations = get_option_expirations(ticker)
-        target = min(expirations, key=lambda e: abs(years_to_expiration(e) - 30 / 365))
-        T = years_to_expiration(target)
-        r = risk_free_rate(T, yield_curve)
-        q = get_dividend_yield(ticker)
-        calls, _ = get_option_chain(ticker, target)
-        enriched = enrich_chain_with_iv_and_greeks(calls, S, target, "call", r, q)
-        atm_row = enriched.iloc[(enriched["strike"] - S).abs().argsort()[:1]]
-        iv = float(atm_row["my_iv"].iloc[0])
-
-        ratio = iv / hv if hv else float("nan")
-        read = "[green]rich[/green]" if ratio > 1.15 else ("[cyan]cheap[/cyan]" if ratio < 0.85 else "in line")
-        table.add_row(ticker, f"${S:.2f}", f"{iv:.1%}", f"{hv:.1%}", f"{ratio:.2f}", read)
+        overview = screen_ticker(ticker, yield_curve)
+        colored_read = {
+            "rich": "[green]rich[/green]",
+            "cheap": "[cyan]cheap[/cyan]",
+            "in line": "in line",
+        }[overview.read]
+        table.add_row(
+            ticker,
+            f"${overview.price:.2f}",
+            f"{overview.atm_iv:.1%}",
+            f"{overview.realized_vol_30d:.1%}",
+            f"{overview.iv_hv_ratio:.2f}",
+            colored_read,
+        )
 
     console.print(table)
     console.print(
