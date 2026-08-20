@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.claude/
+
+# Never commit secrets: Robinhood login, MFA, or cached auth tokens
+.env
+.robinhood_cache/
+*.pickle
+
+.cache/

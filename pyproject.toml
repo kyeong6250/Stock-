@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockoptions"
+version = "0.1.0"
+description = "Options analysis toolkit: Black-Scholes pricing/Greeks, IV rank, multi-leg strategy payoffs, and a backtested directional signal. For education/fun, not investment advice."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "yfinance>=0.2",
+  "scipy>=1.12",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "scikit-learn>=1.4",
+  "python-dotenv>=1.0",
+  "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+robinhood = ["robin_stocks>=3.0"]
+
+[project.scripts]
+stockoptions = "stockoptions.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stockoptions*"]
