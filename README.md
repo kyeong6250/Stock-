@@ -47,6 +47,13 @@ instance, is `strategies.py`'s `max_profit`/`max_loss`/`breakevens`
 wrapped in JSON, not a reimplementation. Runs locally only (it needs
 live yfinance calls server-side); there's no hosted version.
 
+Motion in the UI is deliberately restrained and functional-only —
+stat values count up rather than snapping when they change, chart
+lines draw in to confirm new data actually replaced the old render,
+loading states shimmer instead of sitting blank — no decorative
+bounce/glow/glassmorphism, and all of it degrades instantly and
+correctly under `prefers-reduced-motion: reduce`.
+
 ## Commands
 
 ```sh
