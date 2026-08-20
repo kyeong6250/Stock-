@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>stockoptions dashboard</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">SO</span> stockoptions</div>
+    <nav class="side-nav">
+      <a href="#overview" class="side-link active" data-section="overview">Overview</a>
+      <a href="#chain" class="side-link" data-section="chain">Option chain</a>
+      <a href="#strategy" class="side-link" data-section="strategy">Strategy builder</a>
+      <a href="#backtest" class="side-link" data-section="backtest">Backtest</a>
+    </nav>
+    <div class="sidebar-disclaimer">
+      For education/fun, not investment advice. No model here reliably
+      predicts short-term stock direction &mdash; see the Backtest section
+      before trusting any signal.
+    </div>
+  </aside>
+
+  <main class="content">
+    <header class="topbar">
+      <form id="ticker-form" class="ticker-form">
+        <input id="ticker-input" type="text" placeholder="Ticker, e.g. AAPL" autocomplete="off" value="AAPL" />
+        <button type="submit" class="btn btn-primary">Load</button>
+      </form>
+      <div id="topbar-status" class="topbar-status"></div>
+    </header>
+
+    <section id="overview" class="panel">
+      <h1 id="overview-title">Overview</h1>
+      <div class="stat-grid" id="stat-grid">
+        <div class="stat-card"><div class="stat-label">Price</div><div class="stat-value" id="stat-price">&mdash;</div><div class="stat-sub" id="stat-price-sub"></div></div>
+        <div class="stat-card"><div class="stat-label">ATM implied vol (~30d)</div><div class="stat-value" id="stat-iv">&mdash;</div></div>
+        <div class="stat-card"><div class="stat-label">30d realized vol</div><div class="stat-value" id="stat-hv">&mdash;</div></div>
+        <div class="stat-card" id="stat-read-card"><div class="stat-label">IV / HV read</div><div class="stat-value" id="stat-read">&mdash;</div><div class="stat-sub" id="stat-ratio"></div></div>
+      </div>
+
+      <div class="card chart-card">
+        <div class="card-head">
+          <h2>Price history</h2>
+          <div class="chip-row" id="period-chips">
+            <button class="chip" data-period="1mo">1M</button>
+            <button class="chip" data-period="6mo">6M</button>
+            <button class="chip active" data-period="1y">1Y</button>
+            <button class="chip" data-period="5y">5Y</button>
+          </div>
+        </div>
+        <div id="price-chart" class="chart"></div>
+      </div>
+
+      <div class="card meta-card">
+        <div><span class="meta-label">Risk-free rate used</span><span class="meta-value" id="meta-rate">&mdash;</span></div>
+        <div><span class="meta-label">Dividend yield</span><span class="meta-value" id="meta-div">&mdash;</span></div>
+        <div><span class="meta-label">Nearest expiration screened</span><span class="meta-value" id="meta-exp">&mdash;</span></div>
+      </div>
+    </section>
+
+    <section id="chain" class="panel hidden">
+      <h1>Option chain</h1>
+      <div class="card">
+        <div class="card-head">
+          <h2>Contracts, IV &amp; Greeks recomputed from real quotes</h2>
+          <div class="chain-controls">
+            <select id="chain-expiration"></select>
+            <div class="chip-row">
+              <button class="chip active" data-type="call">Calls</button>
+              <button class="chip" data-type="put">Puts</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="chain-table">
+            <thead>
+              <tr><th>Strike</th><th>Last</th><th>IV</th><th>Delta</th><th>Gamma</th><th>Vega</th><th>Theta</th></tr>
+            </thead>
+            <tbody id="chain-tbody"></tbody>
+          </table>
+        </div>
+        <p class="fine-print">American-style pricing (binomial tree), real maturity-matched risk-free rate and dividend yield &mdash; not a flat guess. Rows with no valid quote are omitted rather than shown as garbage.</p>
+      </div>
+    </section>
+
+    <section id="strategy" class="panel hidden">
+      <h1>Strategy builder</h1>
+      <p class="panel-intro">Pure payoff math for the legs you give it &mdash; no prediction involved. Given a position, its P&amp;L at expiration is arithmetic.</p>
+      <div class="card">
+        <div class="chip-row" id="strategy-kind-chips">
+          <button class="chip active" data-kind="iron-condor">Iron condor</button>
+          <button class="chip" data-kind="vertical">Vertical spread</button>
+          <button class="chip" data-kind="strangle">Strangle</button>
+        </div>
+        <form id="strategy-form" class="strategy-form"></form>
+        <div class="strategy-results" id="strategy-results">
+          <div class="stat-grid stat-grid-4">
+            <div class="stat-card sm"><div class="stat-label">Net premium</div><div class="stat-value" id="strat-premium">&mdash;</div></div>
+            <div class="stat-card sm"><div class="stat-label">Max profit</div><div class="stat-value" id="strat-profit">&mdash;</div></div>
+            <div class="stat-card sm"><div class="stat-label">Max loss</div><div class="stat-value" id="strat-loss">&mdash;</div></div>
+            <div class="stat-card sm"><div class="stat-label">Breakeven(s)</div><div class="stat-value" id="strat-breakeven">&mdash;</div></div>
+          </div>
+          <div id="strategy-chart" class="chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="backtest" class="panel hidden">
+      <h1>Backtest</h1>
+      <p class="panel-intro">The directional signal, always shown next to a majority-class baseline it has to beat to mean anything &mdash; markets drift, so "always guess up" already scores well above 50%.</p>
+      <div class="card">
+        <form id="backtest-form" class="backtest-form">
+          <label>History <select id="backtest-period"><option value="1y">1 year</option><option value="2y" selected>2 years</option><option value="5y">5 years</option></select></label>
+          <label>Horizon (days) <input id="backtest-horizon" type="number" value="5" min="1" max="60" /></label>
+          <button type="submit" class="btn btn-primary">Run backtest</button>
+        </form>
+        <div id="backtest-results" class="hidden">
+          <div class="stat-grid">
+            <div class="stat-card"><div class="stat-label">Model accuracy</div><div class="stat-value" id="bt-accuracy">&mdash;</div></div>
+            <div class="stat-card"><div class="stat-label">Majority baseline</div><div class="stat-value" id="bt-baseline">&mdash;</div></div>
+            <div class="stat-card" id="bt-beats-card"><div class="stat-label">Beats baseline?</div><div class="stat-value" id="bt-beats">&mdash;</div></div>
+            <div class="stat-card"><div class="stat-label">Train / test samples</div><div class="stat-value" id="bt-samples">&mdash;</div></div>
+          </div>
+          <div class="card-head"><h2>Strategy vs. buy &amp; hold</h2>
+            <div class="legend"><span class="legend-dot dot-strategy"></span>Signal strategy <span class="legend-dot dot-hold"></span>Buy &amp; hold</div>
+          </div>
+          <div id="backtest-chart" class="chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      Informational only, not official investment advice. Built on <a href="https://github.com/kyeong6250/Stock-" target="_blank" rel="noopener">kyeong6250/Stock-</a>.
+    </footer>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

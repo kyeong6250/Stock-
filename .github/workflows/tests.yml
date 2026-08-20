@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev,robinhood]"
+      - run: pip install -e ".[dev,robinhood,web]"
       - run: pytest -v
         # STOCKOPTIONS_LIVE_TESTS is intentionally left unset here: tests
         # that hit the real yfinance API are opt-in only (run locally

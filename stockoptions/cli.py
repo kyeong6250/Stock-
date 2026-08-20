@@ -178,6 +178,18 @@ def cmd_watchlist(args: argparse.Namespace) -> None:
     cmd_screen(screen_args)
 
 
+def cmd_dashboard(args: argparse.Namespace) -> None:
+    import webbrowser
+
+    import uvicorn
+
+    url = f"http://{args.host}:{args.port}"
+    console.print(f"[bold]stockoptions dashboard[/bold] starting at {url} (Ctrl+C to stop)")
+    if not args.no_browser:
+        webbrowser.open(url)
+    uvicorn.run("stockoptions.web.app:app", host=args.host, port=args.port, log_level="warning")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="stockoptions", description="Options analysis toolkit. For fun, not financial advice.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -227,6 +239,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_watchlist = sub.add_parser("watchlist", help="pull tickers from your Robinhood watchlist and screen them (needs .env credentials)")
     p_watchlist.add_argument("--name", default="My First List")
     p_watchlist.set_defaults(func=cmd_watchlist)
+
+    p_dashboard = sub.add_parser("dashboard", help="launch the local web dashboard")
+    p_dashboard.add_argument("--host", default="127.0.0.1")
+    p_dashboard.add_argument("--port", type=int, default=8000)
+    p_dashboard.add_argument("--no-browser", action="store_true", help="don't auto-open a browser tab")
+    p_dashboard.set_defaults(func=cmd_dashboard)
 
     return parser
 

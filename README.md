@@ -23,11 +23,29 @@ something to paper over with a confident-looking dashboard.
 
 ```sh
 pip install -e ".[dev]"
-# add the robinhood extra only if you're using the `watchlist` command:
-pip install -e ".[dev,robinhood]"
+# add extras for the pieces you actually want:
+pip install -e ".[dev,web]"         # the dashboard (below)
+pip install -e ".[dev,robinhood]"   # the `watchlist` command
+pip install -e ".[dev,web,robinhood]"
 ```
 
 Requires Python 3.11+.
+
+## Web dashboard
+
+```sh
+stockoptions dashboard
+```
+
+Opens a local dashboard at `http://127.0.0.1:8000` (`--no-browser` to skip
+auto-opening a tab, `--port` to change it): a ticker overview with a price
+chart, the option chain with recomputed IV/Greeks, a strategy payoff
+builder with a live P&L chart, and the backtest panel with the
+strategy-vs-buy-and-hold equity curves. It's a thin UI over the exact
+same tested Python functions the CLI calls — `/api/strategy`, for
+instance, is `strategies.py`'s `max_profit`/`max_loss`/`breakevens`
+wrapped in JSON, not a reimplementation. Runs locally only (it needs
+live yfinance calls server-side); there's no hosted version.
 
 ## Commands
 
@@ -217,10 +235,13 @@ rates.py          real, maturity-matched Treasury risk-free rate
 volatility.py     realized vol, IV rank/percentile, IV skew z-score (pure)
 strategies.py     multi-leg payoff/max-profit/max-loss/breakevens (pure)
 data.py           yfinance wrapper w/ local caching + IV/Greeks recompute
+analysis.py       screen_ticker() -- shared by the CLI and the dashboard
 signals.py        technical features + scaled logistic regression classifier
 backtest.py       purged-gap train/test backtest vs. honest baselines
 robinhood.py      read-only watchlist/positions pull (optional)
 cli.py            argparse subcommands, rich tables, clean error messages
+web/app.py        FastAPI wrapper exposing the same functions as JSON (optional)
+web/static/       vanilla HTML/CSS/JS dashboard, zero frontend dependencies
 ```
 
 The pure modules (`blackscholes`, `volatility`, `strategies`) have no
