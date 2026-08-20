@@ -50,6 +50,36 @@ function setStatus(message, isError = false) {
 const pct = (x, digits = 1) => `${(x * 100).toFixed(digits)}%`;
 const money = (x) => `$${x.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 
+const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Animates a stat value counting from its current displayed number up (or
+// down) to a new one -- feedback that this specific number just changed,
+// not a decorative flourish. Skips straight to the final text if the user
+// has asked for reduced motion, or if the value isn't actually numeric
+// (e.g. "Yes"/"No" or a strike list), so it's a safe drop-in for setting
+// any stat-value's text.
+function setStatAnimated(el, targetText, { from = null, duration = 500 } = {}) {
+  const numeric = targetText.match(/^(\$?)(-?[\d,]+\.?\d*)(%?)$/);
+  if (!numeric || prefersReducedMotion()) {
+    el.textContent = targetText;
+    return;
+  }
+  const [, prefix, numStr, suffix] = numeric;
+  const to = parseFloat(numStr.replace(/,/g, ""));
+  const startValue = from !== null && Number.isFinite(from) ? from : 0;
+  const decimals = (numStr.split(".")[1] || "").length;
+  const start = performance.now();
+
+  function tick(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out
+    const value = startValue + (to - startValue) * eased;
+    el.textContent = `${prefix}${value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
 // Escapes any string interpolated into an innerHTML template below. Most
 // strings rendered here are our own formatted numbers, but chart series
 // names originate from the user-typed ticker box (see sanitizeTicker),
@@ -121,6 +151,25 @@ function renderLineChart(container, series, opts = {}) {
 
   container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${parts.join("")}</svg>`;
 
+  // Draw-in: the data line sweeps from left to right instead of just
+  // appearing -- orients the eye to "this is a series over time," and
+  // doubles as free confirmation that new data actually replaced the old
+  // chart rather than a stale render sitting there. Off entirely under
+  // reduced-motion; each series is staggered slightly so overlapping
+  // lines (strategy vs. buy & hold) read as distinct sweeps.
+  if (!prefersReducedMotion()) {
+    container.querySelectorAll("svg path").forEach((path, idx) => {
+      const length = path.getTotalLength();
+      path.style.strokeDasharray = `${length}`;
+      path.style.strokeDashoffset = `${length}`;
+      path.getBoundingClientRect(); // force reflow so the transition below actually animates
+      path.style.transition = `stroke-dashoffset 0.7s ease-out ${idx * 0.1}s`;
+      requestAnimationFrame(() => {
+        path.style.strokeDashoffset = "0";
+      });
+    });
+  }
+
   const tooltip = document.createElement("div");
   tooltip.style.cssText =
     "position:absolute;pointer-events:none;background:#171d18;border:1px solid #232b25;border-radius:8px;padding:8px 10px;font-size:12px;display:none;white-space:nowrap;z-index:5;";
@@ -152,11 +201,23 @@ function renderLineChart(container, series, opts = {}) {
 // ---------------- overview ----------------
 
 async function loadOverview(ticker) {
-  const overview = await apiGet(`/api/overview/${ticker}`);
+  const statPrice = document.getElementById("stat-price");
+  const statIv = document.getElementById("stat-iv");
+  const statHv = document.getElementById("stat-hv");
+  const loadingEls = [statPrice, statIv, statHv];
+  loadingEls.forEach((el) => el.classList.add("is-loading"));
+
+  let overview;
+  try {
+    overview = await apiGet(`/api/overview/${ticker}`);
+  } finally {
+    loadingEls.forEach((el) => el.classList.remove("is-loading"));
+  }
+
   document.getElementById("overview-title").textContent = `${overview.ticker} overview`;
-  document.getElementById("stat-price").textContent = money(overview.price);
-  document.getElementById("stat-iv").textContent = pct(overview.atmIv);
-  document.getElementById("stat-hv").textContent = pct(overview.realizedVol30d);
+  setStatAnimated(statPrice, money(overview.price));
+  setStatAnimated(statIv, pct(overview.atmIv));
+  setStatAnimated(statHv, pct(overview.realizedVol30d));
 
   const readEl = document.getElementById("stat-read");
   const readCard = document.getElementById("stat-read-card");
