@@ -53,6 +53,17 @@ def test_backtest_returns_well_formed_result_on_synthetic_data():
     assert isinstance(result.beats_baseline, bool)
 
 
+def test_backtest_equity_curves_are_aligned_and_start_near_one():
+    history = _synthetic_history()
+    result = backtest(history, horizon_days=5, train_fraction=0.7)
+
+    assert len(result.dates) == len(result.strategy_equity_curve) == len(result.buy_and_hold_equity_curve)
+    assert result.strategy_equity_curve[0] == pytest.approx(1.0, abs=0.15)  # first trade's return, not exactly 1.0
+    assert result.buy_and_hold_equity_curve[0] == pytest.approx(1.0, abs=0.05)
+    # The strategy's own final value should match its reported total return.
+    assert result.strategy_equity_curve[-1] - 1 == pytest.approx(result.strategy_total_return)
+
+
 def test_backtest_raises_with_insufficient_history():
     history = _synthetic_history(n=60)  # not enough after 50-day SMA + split
     with pytest.raises(ValueError):

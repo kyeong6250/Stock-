@@ -35,6 +35,9 @@ class BacktestResult:
     buy_and_hold_total_return: float
     strategy_sharpe: float
     strategy_max_drawdown: float
+    dates: list[str]  # test-period dates (ISO), for charting the two curves below
+    strategy_equity_curve: list[float]  # both start at 1.0
+    buy_and_hold_equity_curve: list[float]
 
     @property
     def beats_baseline(self) -> bool:
@@ -94,6 +97,11 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
     sharpe = _sharpe(strategy_returns, periods_per_year)
     max_dd = _max_drawdown(equity_curve) if len(equity_curve) else 0.0
 
+    # Buy-and-hold curve over the same dates as the strategy curve (which
+    # drops the last horizon_days test rows, no forward return to compute
+    # there yet) so the two are directly comparable point-for-point on a chart.
+    buy_hold_curve = (test_data["Close"] / test_data["Close"].iloc[0]).loc[strategy_returns.index]
+
     return BacktestResult(
         accuracy=accuracy,
         majority_baseline_accuracy=majority_baseline_accuracy,
@@ -103,4 +111,7 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
         buy_and_hold_total_return=buy_and_hold_total_return,
         strategy_sharpe=sharpe,
         strategy_max_drawdown=max_dd,
+        dates=[d.strftime("%Y-%m-%d") for d in strategy_returns.index],
+        strategy_equity_curve=[float(v) for v in equity_curve],
+        buy_and_hold_equity_curve=[float(v) for v in buy_hold_curve],
     )
