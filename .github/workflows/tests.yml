@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev,robinhood]"
+      - run: pytest -v
+        # STOCKOPTIONS_LIVE_TESTS is intentionally left unset here: tests
+        # that hit the real yfinance API are opt-in only (run locally
+        # before committing), so CI stays fast and doesn't flake on a
+        # third-party API being down/rate-limited/market being closed.
