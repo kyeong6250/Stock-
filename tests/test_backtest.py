@@ -64,3 +64,27 @@ def test_backtest_is_deterministic_for_the_same_input():
     result_a = backtest(history)
     result_b = backtest(history)
     assert result_a == result_b
+
+
+def test_backtest_purge_gap_matches_horizon_days_exactly():
+    # Patch train_fraction to a fixed value and check the purge arithmetic
+    # directly against the internal split, rather than comparing two
+    # different horizon_days runs (their total usable row count `len(data)`
+    # also shifts with horizon_days, since a bigger horizon trims more NaN
+    # labels off the tail -- so train_samples alone isn't a clean signal;
+    # the actual invariant that matters is split_idx - train_end == horizon_days).
+    from stockoptions.backtest import build_features, build_labels
+
+    history = _synthetic_history(n=400, seed=7)
+    horizon_days = 15
+    train_fraction = 0.7
+
+    features = build_features(history)
+    labels = build_labels(history, horizon_days)
+    data = features.join(labels).join(history["Close"]).dropna()
+    split_idx = int(len(data) * train_fraction)
+    expected_train_end = split_idx - horizon_days
+
+    result = backtest(history, horizon_days=horizon_days, train_fraction=train_fraction)
+    assert result.n_train_samples == expected_train_end
+    assert result.n_test_samples == len(data) - split_idx

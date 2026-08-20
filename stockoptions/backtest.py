@@ -29,6 +29,7 @@ from stockoptions.signals import FEATURE_COLUMNS, build_features, build_labels, 
 class BacktestResult:
     accuracy: float
     majority_baseline_accuracy: float
+    n_train_samples: int
     n_test_samples: int
     strategy_total_return: float
     buy_and_hold_total_return: float
@@ -58,13 +59,22 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
     data = features.join(labels).join(history["Close"]).dropna()
 
     split_idx = int(len(data) * train_fraction)
-    if split_idx < 30 or len(data) - split_idx < 10:
+    # Purge the last `horizon_days` rows before the split from training:
+    # row i's label was computed by looking horizon_days rows ahead, so
+    # without this gap, training rows within horizon_days of the boundary
+    # have labels that peek across it into the test set -- exactly the
+    # "moving average/label computed at the boundary depends on prices
+    # that extend into the out-of-sample period" leakage pattern confirmed
+    # while researching this (see the README's Accuracy upgrades section).
+    train_end = max(0, split_idx - horizon_days)
+    if train_end < 30 or len(data) - split_idx < 10:
         raise ValueError(
             f"not enough history for a meaningful train/test split: {len(data)} usable rows "
-            f"after feature/label windows, need at least ~57 (30 train + 10 test minimum)"
+            f"after feature/label windows and a {horizon_days}-day purge gap, need at least "
+            f"~{30 + horizon_days + 10} (30 train + purge gap + 10 test minimum)"
         )
 
-    train_data, test_data = data.iloc[:split_idx], data.iloc[split_idx:]
+    train_data, test_data = data.iloc[:train_end], data.iloc[split_idx:]
 
     model = train(train_data[FEATURE_COLUMNS], train_data["label"])
     predictions = model.model.predict(test_data[FEATURE_COLUMNS])
@@ -87,6 +97,7 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
     return BacktestResult(
         accuracy=accuracy,
         majority_baseline_accuracy=majority_baseline_accuracy,
+        n_train_samples=len(train_data),
         n_test_samples=len(test_data),
         strategy_total_return=strategy_total_return,
         buy_and_hold_total_return=buy_and_hold_total_return,

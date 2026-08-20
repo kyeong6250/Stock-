@@ -16,11 +16,13 @@ from stockoptions.data import (
     TickerNotFoundError,
     enrich_chain_with_iv_and_greeks,
     get_current_price,
+    get_dividend_yield,
     get_option_chain,
     get_option_expirations,
     get_price_history,
     years_to_expiration,
 )
+from stockoptions.rates import get_yield_curve, risk_free_rate
 from stockoptions.strategies import breakevens, iron_condor, max_loss, max_profit, strangle, vertical_spread
 from stockoptions.volatility import historical_volatility
 
@@ -45,9 +47,13 @@ def cmd_greeks(args: argparse.Namespace) -> None:
     S = get_current_price(args.ticker)
     calls, puts = get_option_chain(args.ticker, args.expiration)
     chain = calls if args.type == "call" else puts
-    enriched = enrich_chain_with_iv_and_greeks(chain, S, args.expiration, args.type)
 
-    table = Table(title=f"{args.ticker} {args.type}s, exp {args.expiration}  (spot ${S:.2f})")
+    T = years_to_expiration(args.expiration)
+    r = risk_free_rate(T)  # real, maturity-matched Treasury yield -- not a hardcoded guess
+    q = get_dividend_yield(args.ticker)
+    enriched = enrich_chain_with_iv_and_greeks(chain, S, args.expiration, args.type, r, q)
+
+    table = Table(title=f"{args.ticker} {args.type}s, exp {args.expiration}  (spot ${S:.2f}, r={r:.2%}, q={q:.2%})")
     for col in ["strike", "lastPrice", "my_iv", "delta", "gamma", "vega", "theta"]:
         table.add_column(col)
     for _, row in enriched.iterrows():
@@ -71,6 +77,8 @@ def cmd_screen(args: argparse.Namespace) -> None:
     for col in ["ticker", "price", "ATM IV (~30d)", "30d realized vol", "IV/HV", "read"]:
         table.add_column(col)
 
+    yield_curve = get_yield_curve()  # fetch once, reuse (maturity-interpolated) for every ticker below
+
     for ticker in args.tickers:
         S = get_current_price(ticker)
         history = get_price_history(ticker, period="3mo")
@@ -78,8 +86,11 @@ def cmd_screen(args: argparse.Namespace) -> None:
 
         expirations = get_option_expirations(ticker)
         target = min(expirations, key=lambda e: abs(years_to_expiration(e) - 30 / 365))
+        T = years_to_expiration(target)
+        r = risk_free_rate(T, yield_curve)
+        q = get_dividend_yield(ticker)
         calls, _ = get_option_chain(ticker, target)
-        enriched = enrich_chain_with_iv_and_greeks(calls, S, target, "call")
+        enriched = enrich_chain_with_iv_and_greeks(calls, S, target, "call", r, q)
         atm_row = enriched.iloc[(enriched["strike"] - S).abs().argsort()[:1]]
         iv = float(atm_row["my_iv"].iloc[0])
 
@@ -107,6 +118,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     table = Table(title=f"{args.ticker} backtest ({args.horizon}-day horizon, {args.period} history)")
     table.add_column("metric")
     table.add_column("value")
+    table.add_row("Train / test samples", f"{result.n_train_samples} / {result.n_test_samples}")
     table.add_row("Model accuracy", f"{result.accuracy:.1%}")
     table.add_row("Majority-class baseline", f"{result.majority_baseline_accuracy:.1%}")
     table.add_row("Beats baseline?", "yes" if result.beats_baseline else "no")

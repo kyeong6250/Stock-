@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 FEATURE_COLUMNS = ["sma_ratio", "rsi_14", "momentum_10", "volume_ratio", "volatility_20"]
 
@@ -69,7 +71,7 @@ def build_labels(history: pd.DataFrame, horizon_days: int = 5) -> pd.Series:
 
 @dataclass
 class TrainedModel:
-    model: LogisticRegression
+    model: Pipeline  # StandardScaler -> LogisticRegression
     feature_columns: list[str]
 
     def predict_proba_up(self, features_row: pd.Series) -> float:
@@ -78,11 +80,22 @@ class TrainedModel:
 
 
 def train(features: pd.DataFrame, labels: pd.Series) -> TrainedModel:
+    """Fits a StandardScaler + LogisticRegression pipeline. Scaling matters
+    here specifically because the five features live on very different
+    scales (rsi_14 spans 0-100; sma_ratio and volatility_20 are small
+    decimals) -- logistic regression's regularization penalizes large
+    coefficients uniformly, so on unscaled features it implicitly
+    under-weights the smaller-magnitude ones for reasons that have nothing
+    to do with their actual predictive value. Using a Pipeline (rather
+    than scaling features separately before calling this function) keeps
+    the same fitted scaler applied consistently at both train and predict
+    time -- there's no way to accidentally score new data with a
+    differently-fitted scaler."""
     data = features.join(labels.rename("label")).dropna()
     if len(data) < 30:
         raise ValueError(f"need at least 30 labeled samples to train, got {len(data)}")
     X = data[FEATURE_COLUMNS]
     y = data["label"].astype(int)
-    model = LogisticRegression(max_iter=1000)
+    model = Pipeline([("scaler", StandardScaler()), ("logreg", LogisticRegression(max_iter=1000))])
     model.fit(X, y)
     return TrainedModel(model, FEATURE_COLUMNS)

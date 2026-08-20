@@ -71,32 +71,98 @@ while building this produced:
 
 | metric | value |
 |---|---|
-| Model accuracy | 56.3% |
+| Model accuracy | 48.9% |
 | Majority-class baseline | 57.8% |
 | Beats baseline? | **no** |
-| Strategy total return | 89.4% |
+| Strategy total return | 50.8% |
 | Buy & hold total return | 17.3% |
 
-Notice the trap that result is designed to catch: "89.4% strategy return"
+Notice the trap that result is designed to catch: "50.8% strategy return"
 looks great in isolation, and would make a convincing screenshot. But the
-model's raw accuracy (56.3%) didn't even beat the boring baseline of
-always guessing whichever direction was more common in training data
-(57.8%) — AAPL just drifted up a lot over this window, and the strategy's
-return mostly reflects that drift (amplified by the backtester's
-overlapping-position simplification, see `backtest.py`), not a real
-predictive edge. This is exactly why `backtest`'s output always shows
-accuracy next to the baseline instead of a bare number: the bare number
-alone would have been actively misleading here.
+model's raw accuracy (48.9%, worse than a coin flip) doesn't come close
+to the boring baseline of always guessing whichever direction was more
+common in training data (57.8%) — AAPL just drifted up a lot over this
+window, and the strategy's return mostly reflects that drift (amplified
+by the backtester's overlapping-position simplification, see
+`backtest.py`), not a real predictive edge. This is exactly why
+`backtest`'s output always shows accuracy next to the baseline instead of
+a bare number: the bare number alone would have been actively misleading
+here.
+
+(This accuracy figure used to read 56.3% — still failing to beat the
+baseline, but less badly. The train/test leakage fix described below
+changed the actual conclusion, not just a cosmetic number: some of that
+original 56.3% was the model getting an unfair peek across the train/test
+boundary. Worth sitting with, if you're tempted to trust a stock-direction
+backtest that looks decent.)
+
+## Accuracy upgrades
+
+Researched what would actually make this more accurate before building
+it (see sources at the bottom of this section) rather than guessing.
+Four concrete gaps, in order of how much they mattered:
+
+**1. Train/test label leakage at the split boundary (real bug, changed
+the actual conclusion).** A label for day *i* is computed by looking
+`horizon_days` ahead. Without a gap, training rows within `horizon_days`
+of the train/test split have labels that peek across the boundary into
+the test set — precisely the leakage pattern the research flagged:
+*"a moving average calculated at the end of the in-sample period depends
+on prices that extend into the out-of-sample period... creates data
+leakage at the boundary."* `backtest.py` now purges the last
+`horizon_days` training rows before the split. This is the fix that
+dropped the AAPL result above from 56.3% to 48.9% — the leaked rows were
+inflating apparent accuracy.
+
+**2. Real US equity options are American-style; this project only ever
+priced/solved-IV with European Black-Scholes.** That's a known,
+textbook-documented source of error — an American option's early-exercise
+right has real value Black-Scholes can't price in. `binomial.py` adds a
+Cox-Ross-Rubinstein tree with early exercise checked at every node, and
+is now the default pricing model `data.py` uses to recompute IV and
+Greeks. Cross-validated against `blackscholes.py`: an American call on a
+non-dividend stock converges to the Black-Scholes price (the textbook
+"never optimal to early-exercise" result), while American puts and
+dividend-paying calls price strictly higher, as they should.
+
+**3. `r` was a hardcoded 0.05 guess everywhere.** `rates.py` fetches the
+real, current Treasury yield curve and interpolates a rate matched to
+each option's own time-to-expiration, per standard practice confirmed
+while researching this (maturity-match the risk-free rate to the
+option's term). Live-checked while building this that short and long
+rates can differ by more than a full point (13-week bill at 3.70% vs.
+30-year bond at 5.19%) — a single flat constant was never a good
+approximation.
+
+**4. `q` (dividend yield) defaulted to 0 for every ticker.**
+`get_dividend_yield()` fetches the real trailing dividend yield instead.
+Also had to sort out a units mismatch on yfinance's side: its
+`dividendYield` field turned out to already be a percentage number (2.39
+meaning 2.39%), while `trailingAnnualDividendYield` is the same figure
+already expressed as a decimal (0.0239) — confirmed by cross-checking
+`trailingAnnualDividendRate / price` against both fields across five
+tickers, including a non-dividend payer, before trusting either.
+
+Feature scaling (`StandardScaler` in `signals.py`'s training pipeline)
+was also added, since the five technical-indicator features live on very
+different scales (RSI spans 0-100; the others are small decimals) and
+logistic regression's regularization implicitly under-weights
+smaller-magnitude features for reasons that have nothing to do with
+their actual predictive value.
+
+Sources: [risk-free rate maturity matching](https://fastercapital.com/content/The-Role-of-Risk-Free-Rates-in-Black-Scholes-Pricing.html),
+[binomial vs. Black-Scholes for American options](https://mbrenndoerfer.com/writing/binomial-tree-option-pricing-cox-ross-rubinstein),
+[walk-forward validation and label leakage](https://blog.quantinsti.com/walk-forward-optimization-python-xgboost-stock-prediction/).
 
 ## Why recompute IV instead of trusting yfinance's own column?
 
 Pull a deep ITM options chain from yfinance and check its
 `impliedVolatility` column — you'll see values like 800%, obvious noise
 from stale/illiquid quotes, not a real market view. Rather than trust
-that, `data.py` recomputes IV per contract from its own bid/ask midpoint
-via the Black-Scholes solver in `blackscholes.py`, and skips (as NaN)
-any contract whose price doesn't correspond to a valid IV rather than
-letting one bad row poison a whole chain scan.
+that, `data.py` recomputes IV per contract from its own bid/ask midpoint,
+using the American binomial model by default (see Accuracy upgrades
+above), and skips (as NaN) any contract whose price doesn't correspond to
+a valid IV rather than letting one bad row poison a whole chain scan.
 
 Similarly, `screen`'s IV/HV comparison is deliberately *not* called an
 "IV rank": a true IV rank needs a historical time series of implied
@@ -145,12 +211,14 @@ by market makers before a retail script would ever see it.
 ## Architecture
 
 ```
-blackscholes.py   pricing, Greeks, implied volatility (pure math, no I/O)
+blackscholes.py   European pricing, Greeks, implied volatility (pure math)
+binomial.py       American pricing/Greeks/IV via a CRR tree (pure math)
+rates.py          real, maturity-matched Treasury risk-free rate
 volatility.py     realized vol, IV rank/percentile, IV skew z-score (pure)
 strategies.py     multi-leg payoff/max-profit/max-loss/breakevens (pure)
 data.py           yfinance wrapper w/ local caching + IV/Greeks recompute
-signals.py        technical features + logistic regression classifier
-backtest.py       chronological train/test backtest vs. honest baselines
+signals.py        technical features + scaled logistic regression classifier
+backtest.py       purged-gap train/test backtest vs. honest baselines
 robinhood.py      read-only watchlist/positions pull (optional)
 cli.py            argparse subcommands, rich tables, clean error messages
 ```
