@@ -26,7 +26,8 @@ pip install -e ".[dev]"
 # add extras for the pieces you actually want:
 pip install -e ".[dev,web]"         # the dashboard (below)
 pip install -e ".[dev,robinhood]"   # the `watchlist` command
-pip install -e ".[dev,web,robinhood]"
+pip install -e ".[dev,social]"      # Truth Social pulls (`influencer truth ...`)
+pip install -e ".[dev,web,robinhood,social]"
 ```
 
 Requires Python 3.11+.
@@ -84,6 +85,13 @@ stockoptions backtest AAPL --period 2y --horizon 5
 
 # Pull tickers from your Robinhood watchlist, then screen them (needs .env, see below)
 stockoptions watchlist
+
+# Recent headlines for a ticker (informational -- see News & influencer tracking below)
+stockoptions news AAPL
+
+# Recent posts from a public figure, read-only, unofficial (see the risk disclosure below)
+stockoptions influencer truth realDonaldTrump
+stockoptions influencer x elonmusk    # off by default -- see why in the section below
 ```
 
 Also runnable as `python -m stockoptions <command>` if you didn't install
@@ -220,12 +228,66 @@ Setup: `cp .env.example .env`, fill in `ROBINHOOD_USERNAME` /
 gitignored. Every other command works with zero Robinhood credentials —
 you just type tickers in yourself.
 
+## News & influencer tracking
+
+Recent headlines and public figures' recent posts, on the dashboard's
+"News & catalysts" panel and via `stockoptions news`/`stockoptions
+influencer`. This is **informational only** -- it doesn't feed
+`backtest.py`'s directional signal. Turning headlines/posts into a
+sentiment feature is a real technique with a real (and mixed, easy-to-
+overfit) track record in the research, and doing it honestly needs its
+own walk-forward validation work this project hasn't done. Bolting it
+onto the existing model without that would be exactly the kind of
+confident-looking-but-unvalidated number this README keeps arguing
+against elsewhere (see Honest results above). So for now: it's here for
+a human to read, not for the model to use.
+
+**Ticker news** (`news.py`): free, no setup. Pulls straight from Yahoo
+Finance via yfinance (same dependency `data.py` already uses). Add a free
+[Finnhub](https://finnhub.io) API key (`FINNHUB_API_KEY` in `.env`, see
+`.env.example`) for `get_market_news()`/`search_mentions()` -- broader,
+ticker-agnostic market news and a simple client-side keyword filter over
+it (a substring filter, not a real search index -- Finnhub's free tier
+doesn't offer full-text search on this endpoint).
+
+**Influencer watch** (`social.py`): unofficial, read-only pulls from a
+small, fixed watchlist (currently Trump on Truth Social, Musk on X) --
+deliberately not a free-text field, so nothing typed into the dashboard
+ever reaches these scrapers. Real risk, same category as the Robinhood
+integration above, read before using:
+
+- **Truth Social** works today with **no login required** for reading a
+  public account -- live-verified while building this
+  (`Api(require_auth=False).pull_statuses("realDonaldTrump")` returned
+  real, current posts). Uses [`truthbrush`](https://github.com/stanfordio/truthbrush)
+  (Stanford Internet Observatory), which calls Truth Social's own private
+  app API -- Truth Social has no self-serve public API, and whether
+  truthbrush's own "publicly accessible" framing makes this
+  ToS-compliant is a real, unresolved question this project doesn't
+  settle for you. Optional `TRUTHSOCIAL_USERNAME`/`PASSWORD` in `.env`
+  switch to authenticated mode for higher rate limits.
+- **X (Twitter)** is **off by default and not expected to work**. X's
+  official API has no meaningful free tier, and free scraping mirrors
+  (Nitter) have almost entirely collapsed under X's anti-scraping
+  lockdown. Live-checked against five public Nitter instances while
+  building this: three errored outright (HTTP 429/403/500), one had a
+  dead DNS entry, and the one that returned HTTP 200 (`xcancel.com`)
+  turned out to be serving an "RSS reader not yet whitelisted" gate page,
+  not real posts -- a false-positive worth calling out on its own: a
+  naive "did the request succeed?" check would have shipped a feature
+  that silently returns garbage forever. `get_x_posts()` detects that gate
+  and raises instead of pretending it worked; the dashboard shows X as
+  "unavailable" with the real reason rather than an empty list. Set
+  `NITTER_INSTANCE_URL` only if you have a specific instance you've
+  personally confirmed still returns real posts.
+
 ## What it does and doesn't cover
 
 Covers: Black-Scholes pricing/Greeks/IV, multi-leg strategy payoffs
 (vertical spreads, strangles, straddles, iron condors, covered calls),
-IV-vs-realized-vol screening, and a backtested (honestly, against
-baselines) directional signal.
+IV-vs-realized-vol screening, a backtested (honestly, against baselines)
+directional signal, and an informational news/influencer panel (see
+News & influencer tracking above -- explicitly not part of the signal).
 
 Doesn't cover: Special Monthly Compensation-style exotic payoffs, real
 order execution, portfolio-level margin/risk, or anything requiring a
@@ -246,6 +308,8 @@ analysis.py       screen_ticker() -- shared by the CLI and the dashboard
 signals.py        technical features + scaled logistic regression classifier
 backtest.py       purged-gap train/test backtest vs. honest baselines
 robinhood.py      read-only watchlist/positions pull (optional)
+news.py           ticker/market news, informational only (yfinance + optional Finnhub)
+social.py         unofficial read-only influencer post pulls (optional, real ToS risk)
 cli.py            argparse subcommands, rich tables, clean error messages
 web/app.py        FastAPI wrapper exposing the same functions as JSON (optional)
 web/static/       vanilla HTML/CSS/JS dashboard, zero frontend dependencies

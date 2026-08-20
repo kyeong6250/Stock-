@@ -24,7 +24,9 @@ from stockoptions.data import (
     get_price_history,
     years_to_expiration,
 )
+from stockoptions.news import get_ticker_news
 from stockoptions.rates import risk_free_rate
+from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts
 from stockoptions.strategies import (
     breakevens,
     default_scan_range,
@@ -180,6 +182,63 @@ def api_strategy(payload: dict = Body(...)) -> dict:
         "breakevens": bes,
         "curve": [{"s": float(x), "pnl": float(y)} for x, y in zip(xs, ys)],
     }
+
+
+@app.get("/api/news/{ticker}")
+def api_news(ticker: str, limit: int = 8) -> list[dict]:
+    items = get_ticker_news(ticker.upper(), limit=limit)
+    return [
+        {
+            "title": item.title,
+            "summary": item.summary,
+            "publisher": item.publisher,
+            "url": item.url,
+            "publishedAt": item.published_at.isoformat() if item.published_at else None,
+            "source": item.source,
+        }
+        for item in items
+    ]
+
+
+# Well-known figures whose public statements have a track record of moving
+# specific tickers/sectors -- shown on the Influencer watch panel. This is
+# a fixed, curated list (not user-configurable input) specifically so
+# nothing here becomes a free-text field that gets passed to social.py's
+# unofficial scrapers -- see sanitizeTicker()/escapeHtml() in app.js for
+# why unvalidated free text into a scraper or the DOM is exactly the kind
+# of thing this project has already had to defend against once.
+INFLUENCER_WATCHLIST = [
+    {"platform": "truth", "handle": "realDonaldTrump", "label": "Donald Trump"},
+    {"platform": "x", "handle": "elonmusk", "label": "Elon Musk"},
+]
+
+
+@app.get("/api/influencers")
+def api_influencers(limit: int = 5) -> list[dict]:
+    """Best-effort pull per figure -- one source failing (most likely: X,
+    see social.py's docstring) doesn't take down the others."""
+    results = []
+    for entry in INFLUENCER_WATCHLIST:
+        try:
+            fetch = get_truth_social_posts if entry["platform"] == "truth" else get_x_posts
+            posts = fetch(entry["handle"], limit=limit)
+            results.append(
+                {
+                    "platform": entry["platform"],
+                    "handle": entry["handle"],
+                    "label": entry["label"],
+                    "available": True,
+                    "posts": [
+                        {"text": p.text, "url": p.url, "postedAt": p.posted_at.isoformat() if p.posted_at else None}
+                        for p in posts
+                    ],
+                }
+            )
+        except SocialFetchError as exc:
+            results.append(
+                {"platform": entry["platform"], "handle": entry["handle"], "label": entry["label"], "available": False, "error": str(exc), "posts": []}
+            )
+    return results
 
 
 # Mounted last so it doesn't shadow the /api/* routes above.

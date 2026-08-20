@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 from stockoptions.analysis import TickerOverview
 from stockoptions.data import TickerNotFoundError
+from stockoptions.news import NewsItem
+from stockoptions.social import SocialFetchError, SocialPost
 from stockoptions.web.app import app
 
 LIVE = os.environ.get("STOCKOPTIONS_LIVE_TESTS") == "1"
@@ -96,6 +98,46 @@ def test_history_endpoint_live():
     rows = res.json()
     assert len(rows) > 0
     assert "date" in rows[0] and "close" in rows[0]
+
+
+def test_news_endpoint_shape_with_mocked_ticker_news():
+    fake_items = [
+        NewsItem(title="Widget Co beats earnings", summary="...", publisher="Example Wire", url="https://example.com/a", published_at=None, source="yfinance")
+    ]
+    with patch("stockoptions.web.app.get_ticker_news", return_value=fake_items) as mock_fn:
+        res = client.get("/api/news/AAPL?limit=3")
+    assert res.status_code == 200
+    mock_fn.assert_called_once_with("AAPL", limit=3)
+    body = res.json()
+    assert body[0]["title"] == "Widget Co beats earnings"
+    assert body[0]["publisher"] == "Example Wire"
+
+
+def test_influencers_endpoint_isolates_a_failing_source_from_a_working_one():
+    fake_posts = [SocialPost(platform="truth_social", author="realDonaldTrump", text="hello", url="https://x", posted_at=None)]
+    with (
+        patch("stockoptions.web.app.get_truth_social_posts", return_value=fake_posts),
+        patch("stockoptions.web.app.get_x_posts", side_effect=SocialFetchError("no working instance")),
+    ):
+        res = client.get("/api/influencers")
+    assert res.status_code == 200
+    body = res.json()
+    truth_entry = next(e for e in body if e["platform"] == "truth")
+    x_entry = next(e for e in body if e["platform"] == "x")
+    assert truth_entry["available"] is True
+    assert truth_entry["posts"][0]["text"] == "hello"
+    assert x_entry["available"] is False
+    assert "no working instance" in x_entry["error"]
+    assert x_entry["posts"] == []
+
+
+@skip_unless_live
+def test_news_endpoint_live():
+    res = client.get("/api/news/AAPL?limit=3")
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body) > 0
+    assert body[0]["title"]
 
 
 @skip_unless_live

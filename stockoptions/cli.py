@@ -22,6 +22,7 @@ from stockoptions.data import (
     get_price_history,
     years_to_expiration,
 )
+from stockoptions.news import get_ticker_news
 from stockoptions.rates import get_yield_curve, risk_free_rate
 from stockoptions.strategies import breakevens, iron_condor, max_loss, max_profit, strangle, vertical_spread
 
@@ -178,6 +179,51 @@ def cmd_watchlist(args: argparse.Namespace) -> None:
     cmd_screen(screen_args)
 
 
+def cmd_news(args: argparse.Namespace) -> None:
+    items = get_ticker_news(args.ticker, limit=args.limit)
+    if not items:
+        console.print(f"[yellow]No recent news found for {args.ticker}.[/yellow]")
+        return
+    table = Table(title=f"{args.ticker} recent news")
+    table.add_column("published")
+    table.add_column("publisher")
+    table.add_column("headline")
+    for item in items:
+        published = item.published_at.strftime("%Y-%m-%d %H:%M UTC") if item.published_at else "?"
+        table.add_row(published, item.publisher, item.title)
+    console.print(table)
+    console.print("[dim]Informational only -- not fed into the backtest signal. See the README's News section.[/dim]")
+
+
+def cmd_influencer(args: argparse.Namespace) -> None:
+    from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts
+
+    try:
+        if args.platform == "truth":
+            posts = get_truth_social_posts(args.handle, limit=args.limit)
+        else:
+            posts = get_x_posts(args.handle, limit=args.limit)
+    except SocialFetchError as exc:
+        _fail(str(exc), EXIT_DATA_ERROR)
+        return
+
+    if not posts:
+        console.print(f"[yellow]No recent posts found for {args.handle}.[/yellow]")
+        return
+    table = Table(title=f"@{args.handle} recent posts ({args.platform})")
+    table.add_column("posted")
+    table.add_column("text")
+    for post in posts:
+        posted = post.posted_at.strftime("%Y-%m-%d %H:%M UTC") if post.posted_at else "?"
+        text = post.text if len(post.text) <= 100 else post.text[:97] + "..."
+        table.add_row(posted, text)
+    console.print(table)
+    console.print(
+        "[dim]Unofficial, read-only scrape -- see social.py's module docstring for the real risk/reliability "
+        "caveats before trusting this for anything more than casual browsing.[/dim]"
+    )
+
+
 def cmd_dashboard(args: argparse.Namespace) -> None:
     import webbrowser
 
@@ -239,6 +285,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_watchlist = sub.add_parser("watchlist", help="pull tickers from your Robinhood watchlist and screen them (needs .env credentials)")
     p_watchlist.add_argument("--name", default="My First List")
     p_watchlist.set_defaults(func=cmd_watchlist)
+
+    p_news = sub.add_parser("news", help="recent headlines for a ticker (informational only, not used by backtest)")
+    p_news.add_argument("ticker")
+    p_news.add_argument("--limit", type=int, default=10)
+    p_news.set_defaults(func=cmd_news)
+
+    p_influencer = sub.add_parser(
+        "influencer", help="unofficial read-only pull of a public figure's recent posts (see README before use)"
+    )
+    p_influencer.add_argument("platform", choices=["truth", "x"])
+    p_influencer.add_argument("handle", help='e.g. "realDonaldTrump" for Truth Social, "elonmusk" for X')
+    p_influencer.add_argument("--limit", type=int, default=10)
+    p_influencer.set_defaults(func=cmd_influencer)
 
     p_dashboard = sub.add_parser("dashboard", help="launch the local web dashboard")
     p_dashboard.add_argument("--host", default="127.0.0.1")

@@ -89,6 +89,21 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Guards every href built from externally-sourced text (news article
+// links, social post links) before it reaches the DOM -- unlike the
+// ticker box, this text comes from third-party feeds/unofficial scrapers
+// we don't control, so a "javascript:" or "data:" URL slipping through
+// isn't a hypothetical. escapeHtml() alone only protects against markup
+// injection, not a malicious href scheme, so both are needed here.
+function safeUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "#";
+  } catch {
+    return "#";
+  }
+}
+
 // Tickers are letters/digits plus '.' and '-' (share classes like BRK.B,
 // BF-B), uppercased, capped at a sane length. Applied once at the only
 // place free text enters this app, so everything downstream (URLs built
@@ -250,6 +265,64 @@ document.querySelectorAll("#period-chips .chip").forEach((chip) => {
   });
 });
 
+// ---------------- news & influencer watch ----------------
+
+function formatPostTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadNews(ticker) {
+  document.getElementById("news-ticker-title").textContent = `Recent news: ${ticker}`;
+  const list = document.getElementById("news-list");
+  try {
+    const items = await apiGet(`/api/news/${ticker}?limit=8`);
+    if (!items.length) {
+      list.innerHTML = `<p class="fine-print">No recent news found for ${escapeHtml(ticker)}.</p>`;
+      return;
+    }
+    list.innerHTML = items
+      .map(
+        (item) => `<a class="news-item" href="${safeUrl(item.url)}" target="_blank" rel="noopener">
+          <div class="news-item-head"><span>${escapeHtml(item.publisher)}</span><span>${escapeHtml(formatPostTime(item.publishedAt))}</span></div>
+          <div class="news-item-title">${escapeHtml(item.title)}</div>
+          ${item.summary ? `<div class="news-item-summary">${escapeHtml(item.summary)}</div>` : ""}
+        </a>`
+      )
+      .join("");
+  } catch (err) {
+    list.innerHTML = `<p class="fine-print">Couldn't load news: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadInfluencers() {
+  const container = document.getElementById("influencer-list");
+  try {
+    const entries = await apiGet(`/api/influencers?limit=4`);
+    container.innerHTML = entries
+      .map((entry) => {
+        const platformLabel = entry.platform === "truth" ? "Truth Social" : "X";
+        const head = `<div class="influencer-card-head"><span class="influencer-name">${escapeHtml(entry.label)}</span><span class="influencer-platform">${escapeHtml(platformLabel)}</span></div>`;
+        if (!entry.available) {
+          return `<div class="influencer-card">${head}<div class="influencer-unavailable">Unavailable right now: ${escapeHtml(entry.error)}</div></div>`;
+        }
+        const posts = entry.posts.length
+          ? entry.posts
+              .map(
+                (p) => `<a class="influencer-post" href="${safeUrl(p.url)}" target="_blank" rel="noopener">
+                  <span class="influencer-post-time">${escapeHtml(formatPostTime(p.postedAt))}</span>${escapeHtml(p.text || "(no text)")}
+                </a>`
+              )
+              .join("")
+          : `<div class="influencer-unavailable">No recent posts found.</div>`;
+        return `<div class="influencer-card">${head}${posts}</div>`;
+      })
+      .join("");
+  } catch (err) {
+    container.innerHTML = `<p class="fine-print">Couldn't load influencer posts: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
 // ---------------- option chain ----------------
 
 async function loadChainExpirations(ticker) {
@@ -406,7 +479,7 @@ async function loadTicker(ticker) {
   btn.disabled = true;
   setStatus(`Loading ${ticker}...`);
   try {
-    await Promise.all([loadOverview(ticker), loadPriceChart(ticker, state.period)]);
+    await Promise.all([loadOverview(ticker), loadPriceChart(ticker, state.period), loadNews(ticker)]);
     await loadChainExpirations(ticker);
     await loadChainTable();
     setStatus(`Loaded ${ticker}`);
@@ -421,3 +494,4 @@ async function loadTicker(ticker) {
 
 renderStrategyForm();
 loadTicker(state.ticker);
+loadInfluencers(); // fixed watchlist, independent of the searched ticker -- load once
