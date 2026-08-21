@@ -53,6 +53,47 @@ def test_screen_ticker_excludes_a_same_day_expiration_from_target_selection():
     assert overview.nearest_expiration == target_30d
 
 
+def test_screen_ticker_skips_the_nearest_strike_when_it_has_no_valid_quote():
+    # The literal closest-to-spot strike has a zeroed-out (unusable) quote
+    # -- enrich_chain_with_iv_and_greeks correctly marks it NaN -- but a
+    # neighboring strike has a real quote. screen_ticker should use that
+    # one rather than blindly picking the nearest strike regardless of
+    # whether it actually enriched to a valid IV.
+    today = date.today().isoformat()
+    target_30d = (date.today() + timedelta(days=30)).isoformat()
+    S, sigma, r = 100.0, 0.3, 0.04
+    chain = _synthetic_call_chain(S, target_30d, r, sigma)
+    nearest_idx = (chain["strike"] - S).abs().idxmin()
+    chain.loc[nearest_idx, ["bid", "ask", "lastPrice"]] = 0.0  # zero out the nearest-to-spot strike's quote
+
+    with (
+        patch("stockoptions.analysis.get_current_price", return_value=S),
+        patch("stockoptions.analysis.get_price_history", return_value=_synthetic_price_history()),
+        patch("stockoptions.analysis.get_option_expirations", return_value=[today, target_30d]),
+        patch("stockoptions.analysis.get_option_chain", return_value=(chain, chain)),
+        patch("stockoptions.analysis.get_dividend_yield", return_value=0.0),
+    ):
+        overview = screen_ticker("SYN", yield_curve={1.0: r})
+
+    assert overview.atm_iv > 0  # a real number, not NaN silently carried through
+
+
+def test_screen_ticker_raises_when_no_contract_has_a_valid_quote():
+    today = date.today().isoformat()
+    target_30d = (date.today() + timedelta(days=30)).isoformat()
+    bad_chain = pd.DataFrame([{"strike": 100.0, "bid": 0.0, "ask": 0.0, "lastPrice": 0.0}])
+
+    with (
+        patch("stockoptions.analysis.get_current_price", return_value=100.0),
+        patch("stockoptions.analysis.get_price_history", return_value=_synthetic_price_history()),
+        patch("stockoptions.analysis.get_option_expirations", return_value=[today, target_30d]),
+        patch("stockoptions.analysis.get_option_chain", return_value=(bad_chain, bad_chain)),
+        patch("stockoptions.analysis.get_dividend_yield", return_value=0.0),
+    ):
+        with pytest.raises(TickerNotFoundError, match="no option contract with a usable quote"):
+            screen_ticker("SYN", yield_curve={1.0: 0.04})
+
+
 def test_screen_ticker_raises_a_clear_error_when_only_same_day_expirations_exist():
     today = date.today().isoformat()
     with (

@@ -61,7 +61,19 @@ def screen_ticker(ticker: str, yield_curve: dict[float, float] | None = None) ->
 
     calls, _ = get_option_chain(ticker, target)
     enriched = enrich_chain_with_iv_and_greeks(calls, S, target, "call", r, q)
-    atm_row = enriched.iloc[(enriched["strike"] - S).abs().argsort()[:1]]
+    # Filter to rows with a valid recomputed IV *before* picking the
+    # closest-to-spot strike, not after: enrich_chain_with_iv_and_greeks
+    # already sets my_iv to NaN for any contract with a bad/stale quote
+    # (see its own docstring), and the literal nearest strike to spot is
+    # exactly the kind of near-the-money contract that can have thin,
+    # crossed, or zero quotes on an illiquid name -- picking it blindly
+    # would either silently carry a NaN IV into the rich/cheap read below
+    # (a wrong verdict, not a crash) or IndexError outright if the whole
+    # chain came back with no valid quotes at all.
+    valid = enriched.dropna(subset=["my_iv"])
+    if valid.empty:
+        raise TickerNotFoundError(f"no option contract with a usable quote found for {ticker!r} at expiration {target}")
+    atm_row = valid.iloc[(valid["strike"] - S).abs().argsort()[:1]]
     iv = float(atm_row["my_iv"].iloc[0])
 
     ratio = iv / hv if hv else float("nan")
