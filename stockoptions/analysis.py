@@ -4,8 +4,10 @@ out of sync with each other over time.
 """
 
 from dataclasses import dataclass
+from datetime import date
 
 from stockoptions.data import (
+    TickerNotFoundError,
     enrich_chain_with_iv_and_greeks,
     get_current_price,
     get_dividend_yield,
@@ -41,7 +43,17 @@ def screen_ticker(ticker: str, yield_curve: dict[float, float] | None = None) ->
     hv = historical_volatility(history["Close"], window=30)
 
     expirations = get_option_expirations(ticker)
-    target = min(expirations, key=lambda e: abs(years_to_expiration(e) - 30 / 365))
+    # Same-day (0DTE) expirations -- common for liquid weeklies -- have no
+    # usable time-to-expiration (years_to_expiration requires T > 0) and
+    # can't be priced. Live-caught: without this filter, min()'s key
+    # function raises the moment it evaluates a same-day date, crashing
+    # the whole overview/`screen`/`watchlist` path on any day a ticker
+    # happens to have one in its expirations list -- not a hypothetical,
+    # this is exactly what happened testing this against AAPL's real chain.
+    future_expirations = [e for e in expirations if date.fromisoformat(e) > date.today()]
+    if not future_expirations:
+        raise TickerNotFoundError(f"no future option expirations available for ticker {ticker!r} (only same-day/expired dates found)")
+    target = min(future_expirations, key=lambda e: abs(years_to_expiration(e) - 30 / 365))
     T = years_to_expiration(target)
     curve = yield_curve if yield_curve is not None else get_yield_curve()
     r = risk_free_rate(T, curve)
