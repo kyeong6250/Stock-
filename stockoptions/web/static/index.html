@@ -119,6 +119,7 @@
         <form id="backtest-form" class="backtest-form">
           <label>History <select id="backtest-period"><option value="1y">1 year</option><option value="2y" selected>2 years</option><option value="5y">5 years</option></select></label>
           <label>Horizon (days) <input id="backtest-horizon" type="number" value="5" min="1" max="60" /></label>
+          <label>Model <select id="backtest-model"><option value="logistic" selected>Logistic regression</option><option value="random_forest">Random forest</option></select></label>
           <button type="submit" class="btn btn-primary">Run backtest</button>
         </form>
         <div id="backtest-results" class="hidden">
@@ -132,6 +133,11 @@
             <div class="legend"><span class="legend-dot dot-strategy"></span>Signal strategy <span class="legend-dot dot-hold"></span>Buy &amp; hold</div>
           </div>
           <div id="backtest-chart" class="chart"></div>
+          <p class="fine-print" id="backtest-asof"></p>
+
+          <div class="card-head"><h2>Feature importance</h2></div>
+          <p class="fine-print" style="margin-top: -6px;">How much weight the model trained on this ticker's own training window puts on each input &mdash; not a claim about which indicators work in general. See the README's Accuracy upgrades section for a real cross-ticker comparison.</p>
+          <div id="bt-importance" class="importance-bars"></div>
         </div>
       </div>
     </section>
@@ -195,6 +201,7 @@
           </div>
           <div id="predict-chart" class="chart"></div>
           <p class="fine-print">A statistical projection derived from this contract's own implied volatility (expected move = price &times; IV &times; &radic;(days/365), the standard formula options platforms use), not a forecast of where the price will actually land -- the widening cone visualizes growing uncertainty over time, on purpose.</p>
+          <p class="as-of" id="predict-asof"></p>
         </div>
       </div>
     </section>

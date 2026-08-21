@@ -38,6 +38,7 @@ class BacktestResult:
     dates: list[str]  # test-period dates (ISO), for charting the two curves below
     strategy_equity_curve: list[float]  # both start at 1.0
     buy_and_hold_equity_curve: list[float]
+    feature_importance: dict[str, float]  # from the TRAINING-window model; see signals.TrainedModel.feature_importance()
 
     @property
     def beats_baseline(self) -> bool:
@@ -69,6 +70,7 @@ class BacktestRows:
     test_data: pd.DataFrame  # same columns, test rows only
     predictions: np.ndarray  # model's 0/1 prediction for each test_data row, same order
     forward_returns: pd.Series  # actual (Close[t+horizon]/Close[t] - 1) for each test_data row
+    feature_importance: dict[str, float]  # from the training-window model, see signals.TrainedModel.feature_importance()
 
 
 def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7, model_type: str = "logistic") -> BacktestRows:
@@ -104,7 +106,13 @@ def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: 
     predictions = model.model.predict(test_data[FEATURE_COLUMNS])
     forward_returns = test_data["Close"].shift(-horizon_days) / test_data["Close"] - 1
 
-    return BacktestRows(train_data=train_data, test_data=test_data, predictions=predictions, forward_returns=forward_returns)
+    return BacktestRows(
+        train_data=train_data,
+        test_data=test_data,
+        predictions=predictions,
+        forward_returns=forward_returns,
+        feature_importance=model.feature_importance(),
+    )
 
 
 def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7, model_type: str = "logistic") -> BacktestResult:
@@ -142,4 +150,5 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
         dates=[d.strftime("%Y-%m-%d") for d in strategy_returns.index],
         strategy_equity_curve=[float(v) for v in equity_curve],
         buy_and_hold_equity_curve=[float(v) for v in buy_hold_curve],
+        feature_importance=rows.feature_importance,
     )

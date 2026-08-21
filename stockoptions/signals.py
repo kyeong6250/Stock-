@@ -136,6 +136,27 @@ class TrainedModel:
         X = features_row[self.feature_columns].to_frame().T
         return float(self.model.predict_proba(X)[0][1])
 
+    def feature_importance(self) -> dict[str, float]:
+        """How much weight the fitted model actually puts on each
+        feature, normalized to sum to 1 so the two model types are
+        comparable at a glance. Random forest: scikit-learn's own Gini
+        importance (already non-negative and already sums to 1, nothing
+        to do). Logistic regression: |coefficient| on the *scaled*
+        feature (the StandardScaler step in this same pipeline is what
+        makes comparing raw coefficient magnitudes meaningful here --
+        on unscaled features this comparison would be nonsense, for the
+        same reason train()'s docstring gives for scaling in the first
+        place), then normalized the same way for a like-for-like
+        comparison against the random forest case."""
+        estimator = self.model.named_steps["estimator"]
+        if hasattr(estimator, "feature_importances_"):
+            raw = estimator.feature_importances_
+        else:
+            raw = np.abs(estimator.coef_[0])
+        total = raw.sum()
+        normalized = raw / total if total > 0 else raw
+        return dict(zip(self.feature_columns, (float(v) for v in normalized)))
+
 
 def train(features: pd.DataFrame, labels: pd.Series, model_type: str = "logistic") -> TrainedModel:
     """Fits a StandardScaler + classifier pipeline. Scaling matters here

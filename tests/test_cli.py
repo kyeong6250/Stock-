@@ -90,6 +90,7 @@ def _fake_recommendation():
         dates=["2026-01-01"],
         strategy_equity_curve=[1.1],
         buy_and_hold_equity_curve=[1.05],
+        feature_importance={"rsi_14": 0.5, "macd_hist_norm": 0.5},
     )
     contract = SelectedContract(
         expiration="2026-09-25", dte=36, option_type="call", strike=325.0, premium=4.7, iv=0.245, delta=0.316, T=0.0986, r=0.037

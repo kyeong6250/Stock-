@@ -125,6 +125,14 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     table.add_row("Strategy Sharpe", f"{result.strategy_sharpe:.2f}")
     table.add_row("Strategy max drawdown", f"{result.strategy_max_drawdown:.1%}")
     console.print(table)
+
+    importance_table = Table(title="Feature importance (this ticker's training window)")
+    importance_table.add_column("feature")
+    importance_table.add_column("weight")
+    for name, weight in sorted(result.feature_importance.items(), key=lambda kv: -kv[1]):
+        importance_table.add_row(name, f"{weight:.1%}")
+    console.print(importance_table)
+
     if not result.beats_baseline:
         console.print("[yellow]This signal did not beat the majority-class baseline on this ticker/period.[/yellow]")
     console.print(DISCLAIMER)

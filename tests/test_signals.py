@@ -115,6 +115,48 @@ def test_train_random_forest_fits_and_predicts_on_a_clearly_separable_dataset():
     assert accuracy > 0.85
 
 
+def test_feature_importance_sums_to_one_for_logistic():
+    n = 100
+    rng = np.random.default_rng(4)
+    features = pd.DataFrame({c: rng.normal(0, 1, n) for c in FEATURE_COLUMNS})
+    labels = pd.Series(rng.integers(0, 2, n), name="label")
+    trained = train(features, labels, model_type="logistic")
+    importance = trained.feature_importance()
+    assert set(importance) == set(FEATURE_COLUMNS)
+    assert sum(importance.values()) == pytest.approx(1.0)
+    assert all(v >= 0 for v in importance.values())
+
+
+def test_feature_importance_sums_to_one_for_random_forest():
+    n = 150
+    rng = np.random.default_rng(4)
+    features = pd.DataFrame({c: rng.normal(0, 1, n) for c in FEATURE_COLUMNS})
+    labels = pd.Series(rng.integers(0, 2, n), name="label")
+    trained = train(features, labels, model_type="random_forest")
+    importance = trained.feature_importance()
+    assert set(importance) == set(FEATURE_COLUMNS)
+    assert sum(importance.values()) == pytest.approx(1.0)
+    assert all(v >= 0 for v in importance.values())
+
+
+def test_feature_importance_ranks_the_truly_predictive_feature_highest():
+    # One feature perfectly determines the label, the rest are noise --
+    # a correct importance calculation should rank it clearly first for
+    # both model types, not just produce well-formed-looking numbers.
+    n = 300
+    rng = np.random.default_rng(6)
+    momentum = rng.normal(0, 1, n)
+    features = pd.DataFrame({c: rng.normal(0, 1, n) for c in FEATURE_COLUMNS})
+    features["momentum_10"] = momentum
+    labels = pd.Series((momentum > 0).astype(int), name="label")
+
+    for model_type in ("logistic", "random_forest"):
+        trained = train(features, labels, model_type=model_type)
+        importance = trained.feature_importance()
+        top_feature = max(importance, key=importance.get)
+        assert top_feature == "momentum_10", f"{model_type} ranked {top_feature!r} above the actually-predictive feature"
+
+
 def test_train_random_forest_is_deterministic_across_runs():
     n = 100
     rng = np.random.default_rng(3)

@@ -342,6 +342,17 @@ function renderForecastChart(container, historyRows, cone, S) {
   });
 }
 
+// Plain-language reading of a probabilistic model output, alongside the
+// raw number -- a bare "57.6%" doesn't on its own convey whether that's
+// a strong signal or barely above a coin flip. Thresholds are informed
+// by this project's own backtest results (accuracy rarely clears the
+// high 60s%, and often sits close to 50%), not an arbitrary scale.
+function confidenceLabel(probability) {
+  if (probability >= 0.65) return { text: "High confidence", cls: "confidence-high" };
+  if (probability >= 0.55) return { text: "Moderate confidence", cls: "confidence-moderate" };
+  return { text: "Low confidence", cls: "confidence-low" };
+}
+
 // ---------------- predict ----------------
 
 async function loadPredict(ticker) {
@@ -376,7 +387,9 @@ function renderPredictResult(rec, historyRows) {
     : `<div class="predict-none-card">No sizing warnings triggered for this ticker/horizon -- still not a guarantee, just no flagged red light.</div>`;
 
   document.getElementById("predict-direction").textContent = rec.direction === "up" ? "Bullish (call)" : "Bearish (put)";
-  document.getElementById("predict-confidence").textContent = `${(rec.liveProbability * 100).toFixed(1)}% model confidence`;
+  const conf = confidenceLabel(rec.liveProbability);
+  document.getElementById("predict-confidence").innerHTML =
+    `${(rec.liveProbability * 100).toFixed(1)}% model confidence<span class="confidence-chip ${conf.cls}">${escapeHtml(conf.text)}</span>`;
 
   document.getElementById("predict-accuracy").textContent = `${(rec.backtest.accuracy * 100).toFixed(1)}% / ${(rec.backtest.baseline * 100).toFixed(1)}%`;
 
@@ -398,6 +411,7 @@ function renderPredictResult(rec, historyRows) {
   `;
 
   renderForecastChart(document.getElementById("predict-chart"), historyRows, rec.cone, rec.price);
+  document.getElementById("predict-asof").textContent = `Fetched ${new Date().toLocaleTimeString()} -- prices/quotes can be cached up to 15 minutes`;
 }
 
 document.getElementById("predict-form").addEventListener("submit", (e) => {
@@ -423,6 +437,7 @@ async function loadOverview(ticker) {
 
   document.getElementById("overview-title").textContent = `${overview.ticker} overview`;
   setStatAnimated(statPrice, money(overview.price));
+  document.getElementById("stat-price-sub").textContent = `as of ${new Date().toLocaleTimeString()}`;
   setStatAnimated(statIv, pct(overview.atmIv));
   setStatAnimated(statHv, pct(overview.realizedVol30d));
 
@@ -641,13 +656,36 @@ document.getElementById("strategy-form").addEventListener("submit", async (e) =>
 
 // ---------------- backtest ----------------
 
+function renderImportanceBars(container, importance) {
+  const ranked = Object.entries(importance).sort((a, b) => b[1] - a[1]);
+  const max = ranked.length ? ranked[0][1] : 1;
+  container.innerHTML = ranked
+    .map(
+      ([name, weight]) => `<div class="importance-row">
+        <span class="importance-label">${escapeHtml(name)}</span>
+        <span class="importance-track"><span class="importance-fill" data-target="${((weight / max) * 100).toFixed(1)}"></span></span>
+        <span class="importance-value">${pct(weight)}</span>
+      </div>`
+    )
+    .join("");
+  // Set width after the bar exists in the DOM (not inline in the markup
+  // above) so the CSS transition actually animates from 0 instead of
+  // snapping straight to its final width.
+  requestAnimationFrame(() => {
+    container.querySelectorAll(".importance-fill").forEach((el) => {
+      el.style.width = `${el.dataset.target}%`;
+    });
+  });
+}
+
 document.getElementById("backtest-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const period = document.getElementById("backtest-period").value;
   const horizon = document.getElementById("backtest-horizon").value;
+  const model = document.getElementById("backtest-model").value;
   try {
     setStatus(`Running backtest for ${state.ticker}...`);
-    const result = await apiGet(`/api/backtest/${state.ticker}?period=${period}&horizon=${horizon}`);
+    const result = await apiGet(`/api/backtest/${state.ticker}?period=${period}&horizon=${horizon}&model=${model}`);
     setStatus("");
     document.getElementById("backtest-results").classList.remove("hidden");
     document.getElementById("bt-accuracy").textContent = pct(result.accuracy);
@@ -657,6 +695,7 @@ document.getElementById("backtest-form").addEventListener("submit", async (e) =>
     beatsCard.classList.add(result.beatsBaseline ? "good" : "bad");
     document.getElementById("bt-beats").textContent = result.beatsBaseline ? "Yes" : "No";
     document.getElementById("bt-samples").textContent = `${result.nTrain} / ${result.nTest}`;
+    document.getElementById("backtest-asof").textContent = `Fetched ${new Date().toLocaleTimeString()} · ${model.replace("_", " ")} model`;
 
     renderLineChart(
       document.getElementById("backtest-chart"),
@@ -666,6 +705,8 @@ document.getElementById("backtest-form").addEventListener("submit", async (e) =>
       ],
       { xLabels: result.dates, yFormat: (v) => v.toFixed(2) }
     );
+
+    renderImportanceBars(document.getElementById("bt-importance"), result.featureImportance);
   } catch (err) {
     setStatus(err.message, true);
   }

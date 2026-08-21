@@ -140,6 +140,7 @@ def test_estimate_kelly_edge_flags_insufficient_sample_when_few_rows_match_the_p
         test_data=pd.DataFrame({"Close": np.full(8, 100.0)}, index=dates),
         predictions=np.array([1, 1, 1, 1, 1, 1, 1, 1]),  # all predicted "up" -- fewer than MIN_KELLY_SAMPLE=10 rows total
         forward_returns=pd.Series(np.full(8, 0.01), index=dates),
+        feature_importance={},
     )
     with patch("stockoptions.recommend.backtest_rows", return_value=fake_rows):
         edge = estimate_kelly_edge(_synthetic_history(), "call", moneyness=1.05, iv=0.3, r=0.04, q=0.0, horizon_days=5, predicted_direction="up")

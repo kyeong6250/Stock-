@@ -60,6 +60,23 @@ loading states shimmer instead of sitting blank — no decorative
 bounce/glow/glassmorphism, and all of it degrades instantly and
 correctly under `prefers-reduced-motion: reduce`.
 
+Also applied a few concrete fintech/ML-dashboard UI conventions found
+while researching this: every decision-critical number (current price,
+a prediction, a backtest run) is paired with a "fetched HH:MM:SS"
+freshness timestamp rather than looking permanently live — the
+Bloomberg/LSEG-terminal convention, and a real disclosure here since
+`data.py` caches quotes for up to 15 minutes locally. The Predict
+panel's raw confidence percentage gets a plain-language chip (Low/
+Moderate/High confidence, thresholds set from this project's own
+backtest numbers rather than an arbitrary scale) alongside it, since a
+bare "57.6%" doesn't on its own convey how strong a probabilistic model
+output actually is. And feature importance (see Accuracy upgrades below)
+renders as horizontal bars rather than a bare table, the standard
+recommendation for this kind of ranked-weight display.
+
+Sources: [fintech dashboard UI conventions (freshness timestamps, tabular figures, color reserved for financial state)](https://www.wildnetedge.com/blogs/fintech-ux-design-best-practices-for-financial-dashboards),
+[ML/AI dashboard UX (plain-language confidence labels, bar-plot feature importance)](https://thefinch.design/ux-best-practices-ai-ml-data-visualization-dashboards/).
+
 ## Commands
 
 ```sh
@@ -227,6 +244,21 @@ because switching wasn't a demonstrated improvement, not because it was
 demonstrated to be better. `model_type="random_forest"` is left in as an
 option for anyone who wants to try it on their own tickers, not removed
 just because this particular small comparison didn't favor it.
+
+The Bollinger-importance claim didn't hold up either, on its own terms.
+`TrainedModel.feature_importance()` exposes exactly what each trained
+model weights (shown on `stockoptions backtest`'s CLI output and the
+dashboard's Backtest panel, as a bar chart per the UI research below).
+Running it on AAPL's actual training window: `macd_hist_norm` and
+`rsi_14` come out on top for both model types, with `bollinger_pctb`
+solidly mid-pack (roughly 8% of total weight, versus MACD's ~37%) — not
+"substantially more informative than other features" the way the source
+study reported for its own data. Kept anyway: MACD/ATR turning out to
+matter more here is still a genuine finding this project wouldn't have
+without adding all three, and one ticker's importance ranking, like the
+three-ticker model comparison above, isn't a large enough sample to
+conclude Bollinger Bands are never useful — only that this particular
+claim didn't transfer to this particular model on this particular data.
 
 Sources: [risk-free rate maturity matching](https://fastercapital.com/content/The-Role-of-Risk-Free-Rates-in-Black-Scholes-Pricing.html),
 [binomial vs. Black-Scholes for American options](https://mbrenndoerfer.com/writing/binomial-tree-option-pricing-cox-ross-rubinstein),

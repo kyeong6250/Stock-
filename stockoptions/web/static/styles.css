@@ -360,6 +360,73 @@ select {
   margin-bottom: 10px;
 }
 
+/* ---------- feature importance bars ---------- */
+/* Bar plot rather than a bare table -- horizontal bars make relative
+   weight scannable at a glance, the standard recommendation for
+   feature-importance display (confirmed while researching this). */
+.importance-bars { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+.importance-row { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 10px; }
+
+.importance-label { font-size: 0.8rem; color: var(--text-dim); text-align: right; }
+
+.importance-track { background: var(--panel-2); border-radius: 4px; height: 10px; overflow: hidden; }
+
+.importance-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  border-radius: 4px;
+  width: 0%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .importance-fill { transition: width 0.6s ease-out; }
+}
+
+.importance-value { font-size: 0.78rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* ---------- data freshness (Bloomberg/LSEG-style "as of" convention) ---------- */
+/* Confirmed while researching dashboard UI practices: decision-critical
+   charts/numbers should always be paired with an exact-value label and a
+   data-freshness timestamp, since a stat with no visible "as of" time is
+   easy to mistake for live when it's really served from data.py's
+   15-minute local cache. */
+.as-of {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.as-of::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ---------- confidence labels ---------- */
+/* Plain-language reading of a probabilistic model output alongside the
+   raw number -- confirmed while researching this as standard practice
+   for ML-driven UIs, since a bare "57.6%" doesn't on its own convey
+   whether that's a strong or a barely-above-coin-flip signal. */
+.confidence-chip {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.confidence-low { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+.confidence-moderate { background: rgba(96, 165, 250, 0.15); color: var(--blue); }
+.confidence-high { background: var(--accent-soft); color: var(--accent); }
+
 /* ---------- news & influencer watch ---------- */
 .news-list { display: flex; flex-direction: column; gap: 2px; }
 

@@ -146,6 +146,7 @@ def _fake_recommendation():
         dates=["2026-01-01"],
         strategy_equity_curve=[1.1],
         buy_and_hold_equity_curve=[1.05],
+        feature_importance={"rsi_14": 0.5, "macd_hist_norm": 0.5},
     )
     contract = SelectedContract(
         expiration="2026-09-25", dte=36, option_type="call", strike=325.0, premium=4.7, iv=0.245, delta=0.316, T=0.0986, r=0.037
@@ -212,6 +213,30 @@ def test_news_endpoint_live():
     assert body[0]["title"]
 
 
+def test_backtest_endpoint_includes_feature_importance_with_a_mocked_result():
+    fake = BacktestResult(
+        accuracy=0.5,
+        majority_baseline_accuracy=0.5,
+        n_train_samples=100,
+        n_test_samples=40,
+        strategy_total_return=0.1,
+        buy_and_hold_total_return=0.05,
+        strategy_sharpe=1.0,
+        strategy_max_drawdown=-0.05,
+        dates=["2026-01-01"],
+        strategy_equity_curve=[1.1],
+        buy_and_hold_equity_curve=[1.05],
+        feature_importance={"macd_hist_norm": 0.4, "rsi_14": 0.6},
+    )
+    with patch("stockoptions.web.app.backtest", return_value=fake) as mock_fn:
+        res = client.get("/api/backtest/AAPL?period=2y&horizon=5&model=random_forest")
+    assert res.status_code == 200
+    mock_fn.assert_called_once()
+    assert mock_fn.call_args.kwargs["model_type"] == "random_forest"
+    body = res.json()
+    assert body["featureImportance"] == {"macd_hist_norm": 0.4, "rsi_14": 0.6}
+
+
 @skip_unless_live
 def test_backtest_endpoint_live():
     res = client.get("/api/backtest/AAPL?period=2y&horizon=5")
@@ -219,3 +244,4 @@ def test_backtest_endpoint_live():
     body = res.json()
     assert 0.0 <= body["accuracy"] <= 1.0
     assert len(body["dates"]) == len(body["strategyCurve"]) == len(body["buyHoldCurve"])
+    assert abs(sum(body["featureImportance"].values()) - 1.0) < 1e-6

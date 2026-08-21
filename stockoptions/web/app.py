@@ -134,6 +134,7 @@ def api_backtest(ticker: str, period: str = "2y", horizon: int = 5, model: str =
         "dates": result.dates,
         "strategyCurve": result.strategy_equity_curve,
         "buyHoldCurve": result.buy_and_hold_equity_curve,
+        "featureImportance": result.feature_importance,
     }
 
 
