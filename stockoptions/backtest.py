@@ -152,3 +152,97 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
         buy_and_hold_equity_curve=[float(v) for v in buy_hold_curve],
         feature_importance=rows.feature_importance,
     )
+
+
+@dataclass
+class WalkForwardFold:
+    fold: int
+    n_train: int
+    n_test: int
+    accuracy: float
+    majority_baseline_accuracy: float
+
+    @property
+    def beats_baseline(self) -> bool:
+        return self.accuracy > self.majority_baseline_accuracy
+
+
+@dataclass
+class WalkForwardResult:
+    """The single train/test split backtest() uses can look better or
+    worse than the model's real skill purely because of where that one
+    boundary happened to fall -- confirmed while researching this
+    project's original leakage fix (see this module's docstring and the
+    README's Accuracy upgrades section): walk-forward validation is the
+    standard way to check whether a single-split number is representative
+    or a lucky/unlucky draw, by re-training and re-testing across several
+    chronological windows and reporting the SPREAD, not just one point."""
+
+    folds: list[WalkForwardFold]
+    mean_accuracy: float
+    std_accuracy: float  # sample std across folds; 0.0 if fewer than 2 folds
+    mean_baseline_accuracy: float
+    fraction_of_folds_beating_baseline: float
+
+
+def walk_forward_backtest(
+    history: pd.DataFrame, horizon_days: int = 5, n_folds: int = 5, model_type: str = "logistic"
+) -> WalkForwardResult:
+    """Splits the usable history into `n_folds` + 1 roughly equal
+    chronological chunks. For fold i, trains on an *expanding* window
+    (every chunk before it, i.e. all history available up to that point --
+    not a fixed-size rolling window, since a real trader wouldn't discard
+    old data just to keep window size constant) and tests on chunk i,
+    purging the last `horizon_days` training rows before each boundary
+    exactly like backtest()'s single split does. Each fold gets its own
+    majority-class baseline (computed from that fold's own training data,
+    since the label balance can drift across a multi-year history) rather
+    than reusing one global baseline.
+
+    Meaningfully more expensive than backtest() -- `n_folds` full model
+    fits instead of one -- so this is opt-in (`--walk-forward` on the
+    CLI), not run by default on every backtest."""
+    features = build_features(history)
+    labels = build_labels(history, horizon_days)
+    data = features.join(labels).join(history["Close"]).dropna()
+
+    n = len(data)
+    chunk_size = n // (n_folds + 1)
+    if chunk_size < 30:
+        raise ValueError(
+            f"not enough history for {n_folds} walk-forward folds: {n} usable rows split into "
+            f"{n_folds + 1} chunks gives only ~{chunk_size} rows/chunk, need at least 30"
+        )
+
+    folds = []
+    for i in range(1, n_folds + 1):
+        train_end_idx = i * chunk_size
+        test_end_idx = (i + 1) * chunk_size if i < n_folds else n
+        purge_end = max(0, train_end_idx - horizon_days)
+
+        train_data = data.iloc[:purge_end]
+        test_data = data.iloc[train_end_idx:test_end_idx]
+        if len(train_data) < 30 or len(test_data) < 5:
+            continue
+
+        model = train(train_data[FEATURE_COLUMNS], train_data["label"], model_type=model_type)
+        predictions = model.model.predict(test_data[FEATURE_COLUMNS])
+        accuracy = float((predictions == test_data["label"].values).mean())
+        majority_label = train_data["label"].mode().iloc[0]
+        baseline = float((test_data["label"] == majority_label).mean())
+        folds.append(WalkForwardFold(fold=i, n_train=len(train_data), n_test=len(test_data), accuracy=accuracy, majority_baseline_accuracy=baseline))
+
+    if not folds:
+        raise ValueError("no valid walk-forward folds could be built -- try fewer folds or more history")
+
+    accuracies = [f.accuracy for f in folds]
+    baselines = [f.majority_baseline_accuracy for f in folds]
+    beats = sum(1 for f in folds if f.beats_baseline)
+
+    return WalkForwardResult(
+        folds=folds,
+        mean_accuracy=float(np.mean(accuracies)),
+        std_accuracy=float(np.std(accuracies, ddof=1)) if len(accuracies) > 1 else 0.0,
+        mean_baseline_accuracy=float(np.mean(baselines)),
+        fraction_of_folds_beating_baseline=beats / len(folds),
+    )

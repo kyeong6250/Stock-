@@ -138,6 +138,21 @@
           <div class="card-head"><h2>Feature importance</h2></div>
           <p class="fine-print" style="margin-top: -6px;">How much weight the model trained on this ticker's own training window puts on each input &mdash; not a claim about which indicators work in general. See the README's Accuracy upgrades section for a real cross-ticker comparison.</p>
           <div id="bt-importance" class="importance-bars"></div>
+
+          <div class="card-head">
+            <h2>Walk-forward validation</h2>
+            <button id="run-walkforward" class="btn" type="button">Run (retrains 5x, slower)</button>
+          </div>
+          <p class="fine-print" style="margin-top: -6px;">A single train/test split's accuracy can look better or worse purely from where that one boundary happened to fall. This retrains and re-tests across several expanding chronological windows and shows the spread &mdash; the honest check on whether the number above is representative.</p>
+          <div id="walkforward-results" class="hidden">
+            <div class="table-wrap">
+              <table id="walkforward-table">
+                <thead><tr><th>Fold</th><th>Train / test</th><th>Accuracy</th><th>Baseline</th><th>Beats?</th></tr></thead>
+                <tbody id="walkforward-tbody"></tbody>
+              </table>
+            </div>
+            <p class="fine-print" id="walkforward-summary"></p>
+          </div>
         </div>
       </div>
     </section>

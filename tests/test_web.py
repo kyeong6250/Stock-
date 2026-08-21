@@ -5,8 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from stockoptions.analysis import TickerOverview
+from stockoptions.backtest import BacktestResult, WalkForwardFold, WalkForwardResult
 from stockoptions.data import TickerNotFoundError
-from stockoptions.backtest import BacktestResult
 from stockoptions.news import NewsItem
 from stockoptions.recommend import ConePoint, KellyEdge, RecommendationError, SelectedContract, TradeRecommendation
 from stockoptions.social import SocialFetchError, SocialPost
@@ -235,6 +235,46 @@ def test_backtest_endpoint_includes_feature_importance_with_a_mocked_result():
     assert mock_fn.call_args.kwargs["model_type"] == "random_forest"
     body = res.json()
     assert body["featureImportance"] == {"macd_hist_norm": 0.4, "rsi_14": 0.6}
+
+
+def test_walkforward_endpoint_shape_with_a_mocked_result():
+    fake = WalkForwardResult(
+        folds=[
+            WalkForwardFold(fold=1, n_train=200, n_test=100, accuracy=0.55, majority_baseline_accuracy=0.5),
+            WalkForwardFold(fold=2, n_train=300, n_test=100, accuracy=0.48, majority_baseline_accuracy=0.52),
+        ],
+        mean_accuracy=0.515,
+        std_accuracy=0.05,
+        mean_baseline_accuracy=0.51,
+        fraction_of_folds_beating_baseline=0.5,
+    )
+    with patch("stockoptions.web.app.walk_forward_backtest", return_value=fake) as mock_fn:
+        res = client.get("/api/walkforward/AAPL?period=5y&horizon=5&model=logistic&folds=2")
+    assert res.status_code == 200
+    mock_fn.assert_called_once()
+    assert mock_fn.call_args.kwargs["n_folds"] == 2
+    body = res.json()
+    assert len(body["folds"]) == 2
+    assert body["folds"][0]["beatsBaseline"] is True
+    assert body["folds"][1]["beatsBaseline"] is False
+    assert body["meanAccuracy"] == pytest.approx(0.515)
+    assert body["fractionBeatingBaseline"] == pytest.approx(0.5)
+
+
+def test_walkforward_endpoint_translates_value_error_to_400():
+    with patch("stockoptions.web.app.walk_forward_backtest", side_effect=ValueError("not enough history")):
+        res = client.get("/api/walkforward/AAPL")
+    assert res.status_code == 400
+    assert "not enough history" in res.json()["detail"]
+
+
+@skip_unless_live
+def test_walkforward_endpoint_live():
+    res = client.get("/api/walkforward/AAPL?period=5y&horizon=5&folds=3")
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["folds"]) == 3
+    assert 0.0 <= body["meanAccuracy"] <= 1.0
 
 
 @skip_unless_live

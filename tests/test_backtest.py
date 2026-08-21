@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stockoptions.backtest import _max_drawdown, _sharpe, backtest
+from stockoptions.backtest import _max_drawdown, _sharpe, backtest, walk_forward_backtest
 
 
 def test_max_drawdown_matches_hand_computed_value():
@@ -89,6 +89,59 @@ def test_backtest_rejects_an_unknown_model_type():
     history = _synthetic_history(seed=11)
     with pytest.raises(ValueError, match="model_type"):
         backtest(history, model_type="banana")
+
+
+def test_walk_forward_backtest_produces_one_fold_per_requested_fold_count():
+    history = _synthetic_history(n=1200, seed=15)
+    result = walk_forward_backtest(history, horizon_days=5, n_folds=4)
+    assert len(result.folds) == 4
+    assert all(0.0 <= f.accuracy <= 1.0 for f in result.folds)
+    assert all(0.0 <= f.majority_baseline_accuracy <= 1.0 for f in result.folds)
+
+
+def test_walk_forward_backtest_uses_an_expanding_training_window():
+    history = _synthetic_history(n=1200, seed=16)
+    result = walk_forward_backtest(history, horizon_days=5, n_folds=4)
+    train_sizes = [f.n_train for f in result.folds]
+    assert train_sizes == sorted(train_sizes)  # strictly non-decreasing: fold i's training data is a superset of fold i-1's
+    assert len(set(train_sizes)) == len(train_sizes)  # and actually growing each fold, not flat
+
+
+def test_walk_forward_backtest_purges_horizon_days_at_every_fold_boundary():
+    history = _synthetic_history(n=1200, seed=17)
+    horizon_days = 10
+    features_labels_close = history  # backtest.py computes this internally; just confirm the purge arithmetic via chunk math
+    n_folds = 4
+    result = walk_forward_backtest(history, horizon_days=horizon_days, n_folds=n_folds)
+
+    from stockoptions.backtest import build_features, build_labels
+
+    data = build_features(features_labels_close).join(build_labels(features_labels_close, horizon_days)).join(history["Close"]).dropna()
+    chunk_size = len(data) // (n_folds + 1)
+    for fold in result.folds:
+        train_end_idx = fold.fold * chunk_size
+        expected_train_end = max(0, train_end_idx - horizon_days)
+        assert fold.n_train == expected_train_end
+
+
+def test_walk_forward_backtest_computes_mean_and_std_correctly():
+    history = _synthetic_history(n=1200, seed=18)
+    result = walk_forward_backtest(history, horizon_days=5, n_folds=4)
+    accuracies = [f.accuracy for f in result.folds]
+    assert result.mean_accuracy == pytest.approx(sum(accuracies) / len(accuracies))
+    assert result.fraction_of_folds_beating_baseline == pytest.approx(sum(1 for f in result.folds if f.beats_baseline) / len(result.folds))
+
+
+def test_walk_forward_backtest_raises_with_insufficient_history():
+    history = _synthetic_history(n=100)  # way too short for 5 folds of at least 30 rows each
+    with pytest.raises(ValueError):
+        walk_forward_backtest(history, horizon_days=5, n_folds=5)
+
+
+def test_walk_forward_backtest_accepts_random_forest_model_type():
+    history = _synthetic_history(n=1200, seed=19)
+    result = walk_forward_backtest(history, horizon_days=5, n_folds=3, model_type="random_forest")
+    assert len(result.folds) == 3
 
 
 def test_backtest_purge_gap_matches_horizon_days_exactly():

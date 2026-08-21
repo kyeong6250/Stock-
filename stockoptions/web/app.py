@@ -13,7 +13,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 
 from stockoptions.analysis import screen_ticker
-from stockoptions.backtest import backtest
+from stockoptions.backtest import backtest, walk_forward_backtest
 from stockoptions.data import (
     TickerNotFoundError,
     enrich_chain_with_iv_and_greeks,
@@ -135,6 +135,32 @@ def api_backtest(ticker: str, period: str = "2y", horizon: int = 5, model: str =
         "strategyCurve": result.strategy_equity_curve,
         "buyHoldCurve": result.buy_and_hold_equity_curve,
         "featureImportance": result.feature_importance,
+    }
+
+
+@app.get("/api/walkforward/{ticker}")
+def api_walkforward(ticker: str, period: str = "2y", horizon: int = 5, model: str = "logistic", folds: int = 5) -> dict:
+    try:
+        history = get_price_history(ticker.upper(), period=period)
+        result = walk_forward_backtest(history, horizon_days=horizon, n_folds=folds, model_type=model)
+    except (TickerNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "folds": [
+            {
+                "fold": f.fold,
+                "nTrain": f.n_train,
+                "nTest": f.n_test,
+                "accuracy": f.accuracy,
+                "baseline": f.majority_baseline_accuracy,
+                "beatsBaseline": f.beats_baseline,
+            }
+            for f in result.folds
+        ],
+        "meanAccuracy": result.mean_accuracy,
+        "stdAccuracy": result.std_accuracy,
+        "meanBaseline": result.mean_baseline_accuracy,
+        "fractionBeatingBaseline": result.fraction_of_folds_beating_baseline,
     }
 
 

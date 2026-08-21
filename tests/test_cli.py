@@ -67,6 +67,18 @@ def test_main_reports_value_errors_as_a_clean_message_not_a_traceback(monkeypatc
     assert "stockoptions: error" in err
 
 
+def test_backtest_subcommand_walk_forward_flag_defaults_to_off():
+    args = build_parser().parse_args(["backtest", "AAPL"])
+    assert args.walk_forward is False
+    assert args.folds == 5
+
+
+def test_backtest_subcommand_parses_walk_forward_flag():
+    args = build_parser().parse_args(["backtest", "AAPL", "--walk-forward", "--folds", "3"])
+    assert args.walk_forward is True
+    assert args.folds == 3
+
+
 def test_predict_subcommand_parses_with_defaults():
     args = build_parser().parse_args(["predict", "AAPL"])
     assert args.ticker == "AAPL"

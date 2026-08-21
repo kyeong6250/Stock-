@@ -11,7 +11,7 @@ from rich.table import Table
 
 from stockoptions import __version__
 from stockoptions.analysis import screen_ticker
-from stockoptions.backtest import backtest
+from stockoptions.backtest import backtest, walk_forward_backtest
 from stockoptions.blackscholes import NoArbitrageViolation
 from stockoptions.data import (
     TickerNotFoundError,
@@ -135,6 +135,29 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
     if not result.beats_baseline:
         console.print("[yellow]This signal did not beat the majority-class baseline on this ticker/period.[/yellow]")
+
+    if args.walk_forward:
+        wf = walk_forward_backtest(history, horizon_days=args.horizon, n_folds=args.folds, model_type=args.model)
+        wf_table = Table(title=f"Walk-forward validation ({len(wf.folds)} expanding-window folds)")
+        wf_table.add_column("fold")
+        wf_table.add_column("train / test")
+        wf_table.add_column("accuracy")
+        wf_table.add_column("baseline")
+        wf_table.add_column("beats?")
+        for f in wf.folds:
+            wf_table.add_row(str(f.fold), f"{f.n_train} / {f.n_test}", f"{f.accuracy:.1%}", f"{f.majority_baseline_accuracy:.1%}", "yes" if f.beats_baseline else "no")
+        console.print(wf_table)
+        console.print(
+            f"[bold]Across folds:[/bold] mean accuracy {wf.mean_accuracy:.1%} (std {wf.std_accuracy:.1%}), "
+            f"mean baseline {wf.mean_baseline_accuracy:.1%}, beat baseline in "
+            f"{wf.fraction_of_folds_beating_baseline:.0%} of folds."
+        )
+        console.print(
+            "[dim]This is why the single-split number above shouldn't be over-trusted on its own: "
+            "the same model/ticker can look better or worse purely from where one train/test boundary "
+            "happened to fall. See the README's Accuracy upgrades section.[/dim]"
+        )
+
     console.print(DISCLAIMER)
 
 
@@ -310,6 +333,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--model", choices=["logistic", "random_forest"], default="logistic",
         help="classifier type (default logistic; see README's Accuracy upgrades for why random_forest isn't the default despite sources suggesting it might help)",
     )
+    p_backtest.add_argument(
+        "--walk-forward", action="store_true", dest="walk_forward",
+        help="also run a multi-fold walk-forward validation (slower: retrains the model per fold) to show how stable the single-split number above really is",
+    )
+    p_backtest.add_argument("--folds", type=int, default=5, help="number of walk-forward folds, only used with --walk-forward")
     p_backtest.set_defaults(func=cmd_backtest)
 
     p_strategy = sub.add_parser("strategy", help="max profit/loss/breakevens for a multi-leg position -- pure math, no prediction")

@@ -104,6 +104,7 @@ stockoptions screen AAPL MSFT
 
 # Backtest the directional signal against honest baselines
 stockoptions backtest AAPL --period 2y --horizon 5
+stockoptions backtest AAPL --period 5y --walk-forward --folds 5   # how stable is that number, really?
 
 # A concrete trade suggestion: contract + Kelly-sized position count (see
 # the Trade recommender section below before trusting the sizing)
@@ -162,7 +163,7 @@ conclusion both times: doesn't beat the baseline.)
 
 Researched what would actually make this more accurate before building
 it (see sources at the bottom of this section) rather than guessing.
-Five concrete gaps, in order of how much they mattered:
+Six concrete gaps, in order of how much they mattered:
 
 **1. Train/test label leakage at the split boundary (real bug, changed
 the actual conclusion).** A label for day *i* is computed by looking
@@ -259,6 +260,22 @@ without adding all three, and one ticker's importance ranking, like the
 three-ticker model comparison above, isn't a large enough sample to
 conclude Bollinger Bands are never useful — only that this particular
 claim didn't transfer to this particular model on this particular data.
+
+**6. A single train/test split can't tell you how stable its own number
+is.** The 48.2% AAPL figure at the top of this README comes from one
+70/30 split — and per the same walk-forward research already cited for
+the original leakage fix, a single split's accuracy can look better or
+worse than a model's real skill purely from where that one boundary
+happened to land. `walk_forward_backtest()` (`--walk-forward` on the CLI,
+or the "Run" button on the dashboard's Backtest panel) retrains and
+re-tests across several expanding chronological windows instead, and
+reports the spread. Running it on AAPL, 5 years of history, 5 folds:
+accuracy ranged from 43.5% to 59.0% fold-to-fold (mean 53.0%, std 6.0
+points), beating its own fold's baseline in 3 of 5 folds (60%) — not
+"the model has an edge," but not "the model definitely doesn't" either;
+a single-split verdict either way would have overstated how settled that
+question actually is. This is opt-in, not run by default, since it's
+`n_folds` full model refits instead of one.
 
 Sources: [risk-free rate maturity matching](https://fastercapital.com/content/The-Role-of-Risk-Free-Rates-in-Black-Scholes-Pricing.html),
 [binomial vs. Black-Scholes for American options](https://mbrenndoerfer.com/writing/binomial-tree-option-pricing-cox-ross-rubinstein),
@@ -462,7 +479,7 @@ strategies.py     multi-leg payoff/max-profit/max-loss/breakevens (pure)
 data.py           yfinance wrapper w/ local caching + IV/Greeks recompute
 analysis.py       screen_ticker() -- shared by the CLI and the dashboard
 signals.py        technical features + scaled logistic regression classifier
-backtest.py       purged-gap train/test backtest vs. honest baselines
+backtest.py       purged-gap train/test backtest + walk-forward validation vs. honest baselines
 recommend.py      contract selection + empirical-Kelly position sizing + expected-move cone
 robinhood.py      read-only watchlist/positions pull (optional)
 news.py           ticker/market news, informational only (yfinance + optional Finnhub)

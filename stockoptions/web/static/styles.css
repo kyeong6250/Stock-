@@ -292,6 +292,8 @@ th:first-child, td:first-child { text-align: left; }
 th { color: var(--text-dim); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 tbody tr:hover { background: var(--panel-2); }
 tbody tr.atm { background: var(--accent-soft); }
+td.cell-good { color: var(--accent); font-weight: 600; }
+td.cell-bad { color: var(--red); font-weight: 600; }
 
 .fine-print { color: var(--text-dim); font-size: 0.78rem; margin: 14px 0 0; }
 

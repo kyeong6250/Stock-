@@ -707,8 +707,41 @@ document.getElementById("backtest-form").addEventListener("submit", async (e) =>
     );
 
     renderImportanceBars(document.getElementById("bt-importance"), result.featureImportance);
+    document.getElementById("walkforward-results").classList.add("hidden"); // stale from a previous ticker/settings until re-run
   } catch (err) {
     setStatus(err.message, true);
+  }
+});
+
+document.getElementById("run-walkforward").addEventListener("click", async () => {
+  const period = document.getElementById("backtest-period").value;
+  const horizon = document.getElementById("backtest-horizon").value;
+  const model = document.getElementById("backtest-model").value;
+  const btn = document.getElementById("run-walkforward");
+  btn.disabled = true;
+  setStatus(`Running walk-forward validation for ${state.ticker} (retrains ${5}x)...`);
+  try {
+    const result = await apiGet(`/api/walkforward/${state.ticker}?period=${period}&horizon=${horizon}&model=${model}&folds=5`);
+    setStatus("");
+    document.getElementById("walkforward-results").classList.remove("hidden");
+    document.getElementById("walkforward-tbody").innerHTML = result.folds
+      .map(
+        (f) => `<tr>
+          <td>${f.fold}</td>
+          <td>${f.nTrain} / ${f.nTest}</td>
+          <td>${pct(f.accuracy)}</td>
+          <td>${pct(f.baseline)}</td>
+          <td class="${f.beatsBaseline ? "cell-good" : "cell-bad"}">${f.beatsBaseline ? "yes" : "no"}</td>
+        </tr>`
+      )
+      .join("");
+    document.getElementById("walkforward-summary").textContent =
+      `Across folds: mean accuracy ${pct(result.meanAccuracy)} (std ${pct(result.stdAccuracy)}), ` +
+      `mean baseline ${pct(result.meanBaseline)}, beat baseline in ${pct(result.fractionBeatingBaseline, 0)} of folds.`;
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    btn.disabled = false;
   }
 });
 
