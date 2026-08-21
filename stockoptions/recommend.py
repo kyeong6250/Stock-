@@ -67,7 +67,7 @@ class RecommendationError(ValueError):
     """Raised when a recommendation can't be produced (not enough history, no usable chain, etc.)."""
 
 
-def predict_live_direction(history, horizon_days: int = 35) -> tuple[str, float]:
+def predict_live_direction(history, horizon_days: int = 35, model_type: str = "logistic") -> tuple[str, float]:
     """Today's directional call: trains fresh on *all* available labeled
     history (not the purged train/test split backtest() uses -- that
     split exists to produce an honest held-out accuracy estimate, not the
@@ -86,7 +86,7 @@ def predict_live_direction(history, horizon_days: int = 35) -> tuple[str, float]
     if latest.isna().any():
         raise RecommendationError("not enough recent history to compute today's feature row (need the rolling-window warmup)")
 
-    model = train(labeled[FEATURE_COLUMNS], labeled["label"])
+    model = train(labeled[FEATURE_COLUMNS], labeled["label"], model_type=model_type)
     proba_up = model.predict_proba_up(latest)
     direction = "up" if proba_up >= 0.5 else "down"
     probability = proba_up if direction == "up" else 1 - proba_up
@@ -174,6 +174,7 @@ def estimate_kelly_edge(
     horizon_days: int,
     predicted_direction: str,
     train_fraction: float = 0.7,
+    model_type: str = "logistic",
 ) -> KellyEdge:
     """The empirical edge estimate described in this module's docstring:
     replays backtest.py's own purged-gap test-period rows -- restricted
@@ -198,7 +199,7 @@ def estimate_kelly_edge(
     assumption the real recommendation makes by targeting an expiration
     near horizon_days out in the first place."""
     T = horizon_days / 365
-    rows = backtest_rows(history, horizon_days, train_fraction)
+    rows = backtest_rows(history, horizon_days, train_fraction, model_type=model_type)
     predicted_class = 1 if predicted_direction == "up" else 0
     mask = rows.predictions == predicted_class
 
@@ -311,6 +312,7 @@ def recommend_trade(
     target_delta: float = 0.35,
     kelly_multiplier: float = 0.5,
     pricing_model: str = "binomial",
+    model_type: str = "logistic",
 ) -> TradeRecommendation:
     """The single entry point tying everything in this module together.
     `horizon_days` drives three things at once, deliberately kept as one
@@ -319,7 +321,12 @@ def recommend_trade(
     the Kelly replay assumes -- keeping all three in sync is what makes
     "the model predicts X over this horizon" and "this is the contract
     sized for that horizon" the same claim rather than two that happen to
-    be shown next to each other."""
+    be shown next to each other.
+
+    `model_type` ("logistic" default, or "random_forest") is passed to
+    BOTH predict_live_direction() and estimate_kelly_edge() -- they have
+    to agree, or the Kelly replay would be scoring a different model's
+    predictions than the one that actually produced today's direction."""
     if account_size <= 0:
         raise RecommendationError(f"account_size must be positive, got {account_size}")
     if not (0 < max_risk_pct <= 1):
@@ -331,14 +338,14 @@ def recommend_trade(
     q = get_dividend_yield(ticker)
     yield_curve = get_yield_curve()
 
-    direction, probability = predict_live_direction(history, horizon_days)
-    bt = backtest(history, horizon_days=horizon_days)
+    direction, probability = predict_live_direction(history, horizon_days, model_type=model_type)
+    bt = backtest(history, horizon_days=horizon_days, model_type=model_type)
 
     option_type = "call" if direction == "up" else "put"
     contract = pick_contract(ticker, option_type, S, q, horizon_days, target_delta, yield_curve, pricing_model)
     moneyness = contract.strike / S
 
-    edge = estimate_kelly_edge(history, option_type, moneyness, contract.iv, contract.r, q, horizon_days, direction)
+    edge = estimate_kelly_edge(history, option_type, moneyness, contract.iv, contract.r, q, horizon_days, direction, model_type=model_type)
 
     risk_fraction = max(0.0, min(edge.kelly_fraction * kelly_multiplier, max_risk_pct))
     dollar_budget = account_size * risk_fraction

@@ -113,36 +113,39 @@ while building this produced:
 
 | metric | value |
 |---|---|
-| Model accuracy | 48.9% |
+| Model accuracy | 48.2% |
 | Majority-class baseline | 57.8% |
 | Beats baseline? | **no** |
-| Strategy total return | 50.8% |
-| Buy & hold total return | 17.3% |
+| Strategy total return | 24.4% |
+| Buy & hold total return | 18.0% |
 
-Notice the trap that result is designed to catch: "50.8% strategy return"
-looks great in isolation, and would make a convincing screenshot. But the
-model's raw accuracy (48.9%, worse than a coin flip) doesn't come close
-to the boring baseline of always guessing whichever direction was more
-common in training data (57.8%) — AAPL just drifted up a lot over this
-window, and the strategy's return mostly reflects that drift (amplified
-by the backtester's overlapping-position simplification, see
-`backtest.py`), not a real predictive edge. This is exactly why
+Notice the trap that result is designed to catch: a positive "strategy
+total return" looks good in isolation and would make a convincing
+screenshot. But the model's raw accuracy (48.2%, worse than a coin flip)
+doesn't come close to the boring baseline of always guessing whichever
+direction was more common in training data (57.8%) — AAPL just drifted
+up over this window, and the strategy's return mostly reflects that
+drift (amplified by the backtester's overlapping-position simplification,
+see `backtest.py`), not a real predictive edge. This is exactly why
 `backtest`'s output always shows accuracy next to the baseline instead of
 a bare number: the bare number alone would have been actively misleading
 here.
 
-(This accuracy figure used to read 56.3% — still failing to beat the
-baseline, but less badly. The train/test leakage fix described below
-changed the actual conclusion, not just a cosmetic number: some of that
-original 56.3% was the model getting an unfair peek across the train/test
-boundary. Worth sitting with, if you're tempted to trust a stock-direction
-backtest that looks decent.)
+(This accuracy figure has moved twice, for two different reasons, and
+both are worth sitting with if you're tempted to trust a stock-direction
+backtest that looks decent. It originally read 56.3%; the train/test
+leakage fix described below dropped it to 48.9% — a real bug, not
+cosmetic: some of that original number was the model getting an unfair
+peek across the train/test boundary. It now reads 48.2% after adding
+three more technical indicators (see Accuracy upgrades below) — a small,
+expected drift from changing the feature set, not a bug. Same
+conclusion both times: doesn't beat the baseline.)
 
 ## Accuracy upgrades
 
 Researched what would actually make this more accurate before building
 it (see sources at the bottom of this section) rather than guessing.
-Four concrete gaps, in order of how much they mattered:
+Five concrete gaps, in order of how much they mattered:
 
 **1. Train/test label leakage at the split boundary (real bug, changed
 the actual conclusion).** A label for day *i* is computed by looking
@@ -186,15 +189,51 @@ already expressed as a decimal (0.0239) — confirmed by cross-checking
 tickers, including a non-dividend payer, before trusting either.
 
 Feature scaling (`StandardScaler` in `signals.py`'s training pipeline)
-was also added, since the five technical-indicator features live on very
-different scales (RSI spans 0-100; the others are small decimals) and
+was also added, since the technical-indicator features live on very
+different scales (RSI spans 0-100; most others are small decimals) and
 logistic regression's regularization implicitly under-weights
 smaller-magnitude features for reasons that have nothing to do with
 their actual predictive value.
 
+**5. More technical indicators, and a model comparison that didn't go
+the way the sources suggested it would.** Looked at what other
+open-source technical-indicator classifiers use and added three: MACD
+histogram, Bollinger %B, and Average True Range (`signals.py`) — one
+project's own reported feature-importance ranking specifically called
+out Bollinger Bands as substantially more informative than its other
+features, which is part of why it made the cut here. Also added
+`RandomForestClassifier` as a selectable alternative to logistic
+regression (`train(..., model_type="random_forest")`, same for
+`backtest()`/`predict()`), since multiple sources reported ensembles
+consistently outperforming plain logistic regression on this kind of
+task. Tested that claim rather than taking it on faith: ran both model
+types head-to-head on AAPL, MSFT, and TSLA (2y history, 5-day horizon).
+
+| ticker | logistic accuracy | random forest accuracy | baseline | which beat baseline |
+|---|---|---|---|---|
+| AAPL | 48.1% | 57.0% | 57.8% | neither |
+| MSFT | 45.9% | 44.4% | 48.1% | neither |
+| TSLA | 49.6% | 36.3% | 42.2% | **logistic only** |
+
+No consistent winner — random forest is meaningfully better on AAPL,
+meaningfully *worse* on TSLA, and close-but-slightly-worse on MSFT, and
+logistic regression is the only one of the two that beat its baseline
+anywhere in this sample (TSLA). That's not the sources' "ensembles
+consistently outperform" claim holding up on this project's own data,
+with its own features, over this particular sample of tickers — three
+tickers is too small a sample to draw a general conclusion from either
+way, which is itself the point: logistic regression stays the default
+because switching wasn't a demonstrated improvement, not because it was
+demonstrated to be better. `model_type="random_forest"` is left in as an
+option for anyone who wants to try it on their own tickers, not removed
+just because this particular small comparison didn't favor it.
+
 Sources: [risk-free rate maturity matching](https://fastercapital.com/content/The-Role-of-Risk-Free-Rates-in-Black-Scholes-Pricing.html),
 [binomial vs. Black-Scholes for American options](https://mbrenndoerfer.com/writing/binomial-tree-option-pricing-cox-ross-rubinstein),
-[walk-forward validation and label leakage](https://blog.quantinsti.com/walk-forward-optimization-python-xgboost-stock-prediction/).
+[walk-forward validation and label leakage](https://blog.quantinsti.com/walk-forward-optimization-python-xgboost-stock-prediction/),
+[technical indicators for ML stock prediction (MACD/Bollinger/RSI/etc.)](https://github.com/alisonmitchell/Stock-Prediction),
+[random forest for stock direction, incl. Bollinger feature importance](https://usman-haider.medium.com/predicting-stock-market-movement-with-technical-indicators-and-random-forest-step-by-step-python-2d797d5c7b24),
+[gradient-boosted ensembles outperforming logistic regression on stock trend prediction](https://doaj.org/article/fbff47aeb10a4ee6927e32efeec21ceb).
 
 ## Trade recommender
 
@@ -424,7 +463,12 @@ put-call-parity/IV-skew-z-score approach, [Stock-Options-Analysis-Tool](https://
 Black-Scholes/yfinance combo, and [mirajgodha/options](https://github.com/mirajgodha/options)'s
 multi-leg strategy payoff calculator, which is where the idea for
 `strategies.py` — the one piece of this whole project that involves no
-prediction at all — came from.
+prediction at all — came from. [alisonmitchell/Stock-Prediction](https://github.com/alisonmitchell/Stock-Prediction)'s
+list of technical indicators (MACD, Bollinger Bands, Stochastic
+Oscillator, MFI, ROC, OBV) is where the idea for the three newer
+`signals.py` features came from, though this project only adopted the
+three that seemed most complementary to the original five rather than
+all of them.
 
 ## License
 

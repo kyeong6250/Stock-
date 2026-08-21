@@ -74,6 +74,7 @@ def test_predict_subcommand_parses_with_defaults():
     assert args.risk_pct == 0.02
     assert args.horizon == 35
     assert args.delta == 0.35
+    assert args.model == "logistic"
 
 
 def _fake_recommendation():
@@ -118,7 +119,7 @@ def test_predict_command_prints_the_recommendation_and_warnings(monkeypatch, cap
     with patch("stockoptions.cli.recommend_trade", return_value=_fake_recommendation()) as mock_fn:
         main()
     out = capsys.readouterr().out
-    mock_fn.assert_called_once_with("AAPL", account_size=10_000.0, max_risk_pct=0.02, horizon_days=35, target_delta=0.35)
+    mock_fn.assert_called_once_with("AAPL", account_size=10_000.0, max_risk_pct=0.02, horizon_days=35, target_delta=0.35, model_type="logistic")
     assert "AAPL" in out
     assert "call" in out
     assert "some warning" in out

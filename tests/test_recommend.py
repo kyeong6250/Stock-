@@ -22,9 +22,10 @@ def _synthetic_history(n=400, seed=0, drift=0.0004, vol=0.012):
     rng = np.random.default_rng(seed)
     log_returns = rng.normal(drift, vol, n)
     close = 100 * np.exp(np.cumsum(log_returns))
+    spread = np.abs(rng.normal(0, 0.004, n))  # plausible daily high/low range around each close, for atr_norm
     volume = rng.integers(1_000_000, 5_000_000, n)
     dates = pd.date_range("2023-01-01", periods=n, freq="B")
-    return pd.DataFrame({"Close": close, "Volume": volume}, index=dates)
+    return pd.DataFrame({"Close": close, "High": close * (1 + spread), "Low": close * (1 - spread), "Volume": volume}, index=dates)
 
 
 # ---------------------------------------------------------------------
@@ -256,8 +257,11 @@ def test_recommend_trade_warns_when_it_does_not_beat_baseline():
     rng = np.random.default_rng(9)
     log_returns = rng.normal(0.0, 0.015, 500)
     close = 100 * np.exp(np.cumsum(log_returns))
+    spread = np.abs(rng.normal(0, 0.004, 500))
     dates = pd.date_range("2023-01-01", periods=500, freq="B")
-    flat_history = pd.DataFrame({"Close": close, "Volume": rng.integers(1_000_000, 5_000_000, 500)}, index=dates)
+    flat_history = pd.DataFrame(
+        {"Close": close, "High": close * (1 + spread), "Low": close * (1 - spread), "Volume": rng.integers(1_000_000, 5_000_000, 500)}, index=dates
+    )
 
     patches = _patch_recommend_dependencies(history=flat_history)
     for p in patches:

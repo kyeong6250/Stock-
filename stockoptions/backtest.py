@@ -71,12 +71,13 @@ class BacktestRows:
     forward_returns: pd.Series  # actual (Close[t+horizon]/Close[t] - 1) for each test_data row
 
 
-def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7) -> BacktestRows:
+def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7, model_type: str = "logistic") -> BacktestRows:
     """Trains on the purged-gap training window and predicts across the
     held-out test window, returning the raw per-row data rather than
     aggregate metrics. See backtest()'s docstring for the purge-gap
     rationale (identical logic, factored out here so both functions share
-    one implementation)."""
+    one implementation). `model_type` is passed straight through to
+    signals.train() -- see its docstring for "logistic" vs "random_forest"."""
     features = build_features(history)
     labels = build_labels(history, horizon_days)
     data = features.join(labels).join(history["Close"]).dropna()
@@ -99,15 +100,15 @@ def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: 
 
     train_data, test_data = data.iloc[:train_end], data.iloc[split_idx:]
 
-    model = train(train_data[FEATURE_COLUMNS], train_data["label"])
+    model = train(train_data[FEATURE_COLUMNS], train_data["label"], model_type=model_type)
     predictions = model.model.predict(test_data[FEATURE_COLUMNS])
     forward_returns = test_data["Close"].shift(-horizon_days) / test_data["Close"] - 1
 
     return BacktestRows(train_data=train_data, test_data=test_data, predictions=predictions, forward_returns=forward_returns)
 
 
-def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7) -> BacktestResult:
-    rows = backtest_rows(history, horizon_days, train_fraction)
+def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7, model_type: str = "logistic") -> BacktestResult:
+    rows = backtest_rows(history, horizon_days, train_fraction, model_type=model_type)
     train_data, test_data, predictions, forward_returns = rows.train_data, rows.test_data, rows.predictions, rows.forward_returns
 
     accuracy = float((predictions == test_data["label"].values).mean())

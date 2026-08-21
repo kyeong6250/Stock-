@@ -36,9 +36,10 @@ def _synthetic_history(n=300, seed=0, drift=0.0004, vol=0.012):
     rng = np.random.default_rng(seed)
     log_returns = rng.normal(drift, vol, n)
     close = 100 * np.exp(np.cumsum(log_returns))
+    spread = np.abs(rng.normal(0, 0.004, n))  # plausible daily high/low range around each close, for atr_norm
     volume = rng.integers(1_000_000, 5_000_000, n)
     dates = pd.date_range("2023-01-01", periods=n, freq="B")
-    return pd.DataFrame({"Close": close, "Volume": volume}, index=dates)
+    return pd.DataFrame({"Close": close, "High": close * (1 + spread), "Low": close * (1 - spread), "Volume": volume}, index=dates)
 
 
 def test_backtest_returns_well_formed_result_on_synthetic_data():
@@ -75,6 +76,19 @@ def test_backtest_is_deterministic_for_the_same_input():
     result_a = backtest(history)
     result_b = backtest(history)
     assert result_a == result_b
+
+
+def test_backtest_accepts_random_forest_model_type():
+    history = _synthetic_history(seed=11)
+    result = backtest(history, horizon_days=5, model_type="random_forest")
+    assert 0.0 <= result.accuracy <= 1.0
+    assert result.n_test_samples > 0
+
+
+def test_backtest_rejects_an_unknown_model_type():
+    history = _synthetic_history(seed=11)
+    with pytest.raises(ValueError, match="model_type"):
+        backtest(history, model_type="banana")
 
 
 def test_backtest_purge_gap_matches_horizon_days_exactly():

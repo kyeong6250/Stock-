@@ -111,9 +111,9 @@ def cmd_screen(args: argparse.Namespace) -> None:
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     history = get_price_history(args.ticker, period=args.period)
-    result = backtest(history, horizon_days=args.horizon)
+    result = backtest(history, horizon_days=args.horizon, model_type=args.model)
 
-    table = Table(title=f"{args.ticker} backtest ({args.horizon}-day horizon, {args.period} history)")
+    table = Table(title=f"{args.ticker} backtest ({args.horizon}-day horizon, {args.period} history, {args.model} model)")
     table.add_column("metric")
     table.add_column("value")
     table.add_row("Train / test samples", f"{result.n_train_samples} / {result.n_test_samples}")
@@ -239,6 +239,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
             max_risk_pct=args.risk_pct,
             horizon_days=args.horizon,
             target_delta=args.delta,
+            model_type=args.model,
         )
     except RecommendationError as exc:
         _fail(str(exc), EXIT_BAD_INPUT)
@@ -297,6 +298,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_backtest.add_argument("ticker")
     p_backtest.add_argument("--horizon", type=int, default=5, help="forward-looking days for the up/down label")
     p_backtest.add_argument("--period", default="2y", help="yfinance history period, e.g. 1y/2y/5y")
+    p_backtest.add_argument(
+        "--model", choices=["logistic", "random_forest"], default="logistic",
+        help="classifier type (default logistic; see README's Accuracy upgrades for why random_forest isn't the default despite sources suggesting it might help)",
+    )
     p_backtest.set_defaults(func=cmd_backtest)
 
     p_strategy = sub.add_parser("strategy", help="max profit/loss/breakevens for a multi-leg position -- pure math, no prediction")
@@ -352,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_predict.add_argument("--risk-pct", type=float, default=0.02, dest="risk_pct", help="max fraction of account to risk on this trade, e.g. 0.02 = 2%%")
     p_predict.add_argument("--horizon", type=int, default=35, help="target days-to-expiration / forecast horizon / assumed holding period")
     p_predict.add_argument("--delta", type=float, default=0.35, dest="delta", help="target |delta| for strike selection")
+    p_predict.add_argument("--model", choices=["logistic", "random_forest"], default="logistic", dest="model", help="classifier type, see `backtest --model`")
     p_predict.set_defaults(func=cmd_predict)
 
     p_dashboard = sub.add_parser("dashboard", help="launch the local web dashboard")

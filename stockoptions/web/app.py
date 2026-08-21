@@ -115,10 +115,10 @@ def api_chain(ticker: str, expiration: str = Query(...), type: str = Query("call
 
 
 @app.get("/api/backtest/{ticker}")
-def api_backtest(ticker: str, period: str = "2y", horizon: int = 5) -> dict:
+def api_backtest(ticker: str, period: str = "2y", horizon: int = 5, model: str = "logistic") -> dict:
     try:
         history = get_price_history(ticker.upper(), period=period)
-        result = backtest(history, horizon_days=horizon)
+        result = backtest(history, horizon_days=horizon, model_type=model)
     except (TickerNotFoundError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     return {
@@ -269,9 +269,12 @@ def api_predict(
     risk_pct: float = Query(0.02),
     horizon: int = Query(35),
     delta: float = Query(0.35),
+    model: str = Query("logistic"),
 ) -> dict:
     try:
-        rec = recommend_trade(ticker.upper(), account_size=account_size, max_risk_pct=risk_pct, horizon_days=horizon, target_delta=delta)
+        rec = recommend_trade(
+            ticker.upper(), account_size=account_size, max_risk_pct=risk_pct, horizon_days=horizon, target_delta=delta, model_type=model
+        )
     except (RecommendationError, TickerNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

@@ -175,7 +175,7 @@ def test_predict_endpoint_shape_with_a_mocked_recommendation():
     with patch("stockoptions.web.app.recommend_trade", return_value=_fake_recommendation()) as mock_fn:
         res = client.get("/api/predict/AAPL?account_size=50000&risk_pct=0.03&horizon=20&delta=0.4")
     assert res.status_code == 200
-    mock_fn.assert_called_once_with("AAPL", account_size=50000.0, max_risk_pct=0.03, horizon_days=20, target_delta=0.4)
+    mock_fn.assert_called_once_with("AAPL", account_size=50000.0, max_risk_pct=0.03, horizon_days=20, target_delta=0.4, model_type="logistic")
     body = res.json()
     assert body["ticker"] == "AAPL"
     assert body["direction"] == "up"
