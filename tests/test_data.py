@@ -7,6 +7,7 @@ import pytest
 
 from stockoptions.blackscholes import call_price, greeks
 from stockoptions.data import (
+    TickerNotFoundError,
     _mid_price,
     enrich_chain_with_iv_and_greeks,
     get_current_price,
@@ -108,6 +109,27 @@ def test_get_price_history_returns_real_data():
 @skip_unless_live
 def test_get_current_price_returns_a_positive_number():
     assert get_current_price("AAPL") > 0
+
+
+def test_get_current_price_wraps_a_fast_info_internal_error_as_ticker_not_found(monkeypatch):
+    # Live-caught: yfinance's fast_info lazily fetches quote data on first
+    # field access, and for a genuinely invalid ticker that raised a raw
+    # KeyError deep inside its own scraper rather than returning None the
+    # way a merely-missing field would -- this used to propagate uncaught
+    # past every caller (screen_ticker, scanner.py, ...) that reasonably
+    # only expects TickerNotFoundError from a bad ticker.
+    from unittest.mock import MagicMock
+
+    class ExplodingFastInfo:
+        def get(self, key):
+            raise KeyError("currentTradingPeriod")
+
+    mock_ticker = MagicMock()
+    mock_ticker.fast_info = ExplodingFastInfo()
+    monkeypatch.setattr("stockoptions.data.yf.Ticker", lambda ticker: mock_ticker)
+
+    with pytest.raises(TickerNotFoundError, match="no current price available"):
+        get_current_price("ZZZZZZINVALID")
 
 
 @skip_unless_live

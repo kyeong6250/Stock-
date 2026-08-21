@@ -294,6 +294,8 @@ tbody tr:hover { background: var(--panel-2); }
 tbody tr.atm { background: var(--accent-soft); }
 td.cell-good { color: var(--accent); font-weight: 600; }
 td.cell-bad { color: var(--red); font-weight: 600; }
+#scan-table tbody tr[data-ticker] { cursor: pointer; }
+#scan-table tbody tr.error-row { color: var(--text-dim); }
 
 .fine-print { color: var(--text-dim); font-size: 0.78rem; margin: 14px 0 0; }
 

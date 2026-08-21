@@ -778,6 +778,68 @@ async function loadTicker(ticker) {
   }
 }
 
+// ---------------- scan ----------------
+
+function renderScanResults(results, sortBy) {
+  const tbody = document.getElementById("scan-tbody");
+  const ok = results.filter((r) => !r.error);
+  const failed = results.filter((r) => r.error);
+
+  const sortKey = { volume: (r) => -(r.volumeRatio ?? 0), iv: (r) => -(r.ivHvRatio ?? 0), accuracy: (r) => -(r.backtestAccuracy ?? 0) }[sortBy];
+  ok.sort((a, b) => sortKey(a) - sortKey(b));
+
+  const rows = ok.map((r) => {
+    const volStr = r.volumeRatio != null ? `${r.volumeRatio >= 0 ? "+" : ""}${(r.volumeRatio * 100).toFixed(0)}%` : "?";
+    const modelStr = `${escapeHtml(r.direction)} (${pct(r.liveProbability, 0)})`;
+    const beatsClass = r.beatsBaseline ? "cell-good" : "cell-bad";
+    const btStr = `${pct(r.backtestAccuracy)} vs ${pct(r.backtestBaseline)}`;
+    return `<tr data-ticker="${escapeHtml(r.ticker)}">
+      <td>${escapeHtml(r.ticker)}</td>
+      <td>$${r.price.toFixed(2)}</td>
+      <td>${volStr}</td>
+      <td>${r.ivHvRatio.toFixed(2)}</td>
+      <td>${escapeHtml(r.read)}</td>
+      <td>${modelStr}</td>
+      <td class="${beatsClass}">${btStr}</td>
+    </tr>`;
+  });
+
+  const errorRows = failed.map(
+    (r) => `<tr class="error-row"><td>${escapeHtml(r.ticker)}</td><td colspan="6">Skipped: ${escapeHtml(r.error)}</td></tr>`
+  );
+
+  tbody.innerHTML = rows.concat(errorRows).join("") || `<tr><td colspan="7" class="fine-print">No results.</td></tr>`;
+
+  tbody.querySelectorAll("tr[data-ticker]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const ticker = row.dataset.ticker;
+      document.getElementById("ticker-input").value = ticker;
+      loadTicker(ticker);
+      document.querySelector('.side-link[data-section="overview"]').click();
+    });
+  });
+}
+
+document.getElementById("scan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const raw = document.getElementById("scan-tickers").value.trim();
+  const sortBy = document.getElementById("scan-sort").value;
+  const btn = document.querySelector("#scan-form button");
+  btn.disabled = true;
+  document.getElementById("scan-tbody").innerHTML =
+    `<tr><td colspan="7" class="fine-print">Scanning${raw ? "" : " the curated watchlist"}... this trains a model per ticker, give it a moment.</td></tr>`;
+  try {
+    const params = new URLSearchParams({ horizon: "5", model: "logistic" });
+    if (raw) params.set("tickers", raw);
+    const data = await apiGet(`/api/scan?${params.toString()}`);
+    renderScanResults(data.results, sortBy);
+  } catch (err) {
+    document.getElementById("scan-tbody").innerHTML = `<tr><td colspan="7" class="fine-print">Couldn't load scan: ${escapeHtml(err.message)}</td></tr>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------------- init ----------------
 
 renderStrategyForm();

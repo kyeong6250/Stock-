@@ -13,7 +13,8 @@
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">SO</span> stockoptions</div>
     <nav class="side-nav">
-      <a href="#overview" class="side-link active" data-section="overview">Overview</a>
+      <a href="#scan" class="side-link active" data-section="scan">Scan</a>
+      <a href="#overview" class="side-link" data-section="overview">Overview</a>
       <a href="#chain" class="side-link" data-section="chain">Option chain</a>
       <a href="#strategy" class="side-link" data-section="strategy">Strategy builder</a>
       <a href="#backtest" class="side-link" data-section="backtest">Backtest</a>
@@ -36,7 +37,34 @@
       <div id="topbar-status" class="topbar-status"></div>
     </header>
 
-    <section id="overview" class="panel">
+    <section id="scan" class="panel">
+      <h1>Scan</h1>
+      <p class="panel-intro">Not sure which ticker to look at? Scan a watchlist at once and rank by what's actually happening right now &mdash; real, computed relative volume, not a "trending" claim sourced from anywhere. Click any row to load that ticker everywhere else in the dashboard.</p>
+
+      <div class="card">
+        <form id="scan-form" class="backtest-form">
+          <label>Tickers <input id="scan-tickers" type="text" placeholder="blank = curated watchlist" /></label>
+          <label>Sort by <select id="scan-sort">
+            <option value="volume" selected>Relative volume</option>
+            <option value="iv">IV/HV</option>
+            <option value="accuracy">Backtest accuracy</option>
+          </select></label>
+          <button type="submit" class="btn btn-primary">Scan</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Results</h2></div>
+        <div class="table-wrap">
+          <table id="scan-table">
+            <thead><tr><th>Ticker</th><th>Price</th><th>Vol vs 20d avg</th><th>IV/HV</th><th>Read</th><th>Model says</th><th>Backtest</th></tr></thead>
+            <tbody id="scan-tbody"><tr><td colspan="7" class="fine-print">Click "Scan" to load a curated watchlist, or type your own comma-separated tickers first. Trains a model per ticker, so it takes a moment.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="overview" class="panel hidden">
       <h1 id="overview-title">Overview</h1>
       <div class="stat-grid" id="stat-grid">
         <div class="stat-card stat-card-hero"><div class="stat-label">Price</div><div class="stat-value" id="stat-price">&mdash;</div><div class="stat-sub" id="stat-price-sub"></div></div>

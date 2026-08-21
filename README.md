@@ -331,14 +331,16 @@ hidden behind anything, since they're the part most worth reading).
   approximation: no free source of historical implied volatility exists,
   so *today's* IV stands in for every historical date's IV in that
   replay.
-- The **price-projection chart** is the standard "expected move" cone
-  used across options platforms (Barchart, tastytrade, projectoption,
-  etc.): `expected_move(t) = price × IV × √(t / 365)`, giving a
-  1-standard-deviation band (~68%) and 2-standard-deviation band (~95%)
-  that widens with time. It's a probability *range* derived from the
-  market's own priced-in volatility, not a prediction of where the price
-  will land — shown as a widening cone specifically so the uncertainty
-  stays visible instead of implying false precision.
+- The **price-projection chart** is the standard "expected move"
+  calculation used across options platforms (Barchart, tastytrade,
+  projectoption, etc.): `expected_move(t) = price × IV × √(t / 365)`,
+  giving a 1-standard-deviation band (~68% of outcomes) that widens with
+  time. It's a probability *range* derived from the market's own
+  priced-in volatility, not a prediction of where the price will land —
+  shown as a widening band specifically so the uncertainty stays visible
+  instead of implying false precision. (The API still returns a
+  2-standard-deviation band too; the dashboard just doesn't plot it by
+  default anymore — see the UI simplification note below.)
 
 **Still inherits (3)'s weak edge, and is built to say so:** the
 *direction* being sized is still today's live call from the same
@@ -361,6 +363,50 @@ Sources: [delta selection for directional trades](https://pomegra.io/learn/libra
 [DTE selection and theta decay](https://www.daystoexpiry.com/blog/theta-decay-dte-guide),
 [Kelly criterion for position sizing](https://longbridge.com/en/academy/options/blog/options-position-sizing-kelly-criterion-explained-100160),
 [expected-move probability cones](https://gocharting.com/docs/options-desk/options-probability-cone).
+
+## Multi-ticker scanner
+
+```sh
+stockoptions scan                          # a curated default watchlist
+stockoptions scan AAPL MSFT TSLA GME       # or your own list
+stockoptions scan --sort-by iv             # volume (default) | iv | accuracy
+```
+
+Also the dashboard's "Scan" panel — now the default landing page, since
+"which ticker should I even look at" is a reasonable place to start.
+Click any row to load that ticker into every other panel.
+
+`DEFAULT_WATCHLIST` (`scanner.py`) is a fixed, curated list of large,
+liquid names across sectors, used when no tickers are given — **not** a
+"trending" or "hot stocks" claim pulled from an external service. No
+free, trustworthy "what's actually trending right now" API exists (this
+project already learned that lesson the hard way with Truth Social/X in
+social.py — don't assume a "free" data source works without checking
+first). What genuinely earns a ticker a high spot in the default sort is
+real, computed data pulled at scan time: today's trading volume relative
+to its own trailing 20-day average, using the same price history already
+fetched for the directional model. That's an honest "what's actually
+active in this name right now" signal, not an assertion sourced from
+anywhere.
+
+Deliberately built on the cheaper per-ticker building blocks
+(`screen_ticker`, `predict_live_direction`, `backtest`) rather than
+`recommend_trade()`'s full pipeline — real chain enrichment across every
+strike for delta-targeting, plus the Kelly replay's per-row binomial
+pricing loop, only make sense once you've committed to looking closer at
+one specific ticker, not across a whole watchlist. Run
+`stockoptions predict TICKER` on anything the scan turns up that looks
+worth a closer look.
+
+Caught a real bug building this: scanning an invalid/delisted ticker
+used to crash the *entire* scan, not just fail that one row.
+`get_current_price()`'s underlying yfinance call raises its own internal
+error (a raw `KeyError`, live-caught testing this) for a genuinely
+invalid symbol instead of returning `None` the way a merely-missing
+field normally would — `data.py` now wraps that into the project's own
+`TickerNotFoundError`, and the scanner isolates each ticker's failure
+from the others (same pattern as `/api/influencers`) rather than losing
+every result to one bad symbol.
 
 ## Why recompute IV instead of trusting yfinance's own column?
 
@@ -472,7 +518,8 @@ Covers: Black-Scholes pricing/Greeks/IV, multi-leg strategy payoffs
 (vertical spreads, strangles, straddles, iron condors, covered calls),
 IV-vs-realized-vol screening, a backtested (honestly, against baselines)
 directional signal, a Kelly-sized trade recommender built on top of that
-signal (see Trade recommender above), and an informational news/
+signal (see Trade recommender above), a multi-ticker scanner (see
+Multi-ticker scanner above), and an informational news/
 influencer panel (see News & influencer tracking above -- explicitly not
 part of the signal).
 
@@ -495,6 +542,7 @@ analysis.py       screen_ticker() -- shared by the CLI and the dashboard
 signals.py        technical features + scaled logistic regression classifier
 backtest.py       purged-gap train/test backtest + walk-forward validation vs. honest baselines
 recommend.py      contract selection + empirical-Kelly position sizing + expected-move cone
+scanner.py        multi-ticker scan, ranked by real computed relative volume (not a "trending" claim)
 robinhood.py      read-only watchlist/positions pull (optional)
 news.py           ticker/market news, informational only (yfinance + optional Finnhub)
 social.py         unofficial read-only influencer post pulls (optional, real ToS risk)

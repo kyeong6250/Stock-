@@ -77,8 +77,20 @@ def get_price_history(ticker: str, period: str = "1y", ttl: int = DEFAULT_TTL_SE
 
 
 def get_current_price(ticker: str) -> float:
-    info = yf.Ticker(ticker).fast_info
-    price = info.get("lastPrice") if hasattr(info, "get") else getattr(info, "last_price", None)
+    try:
+        info = yf.Ticker(ticker).fast_info
+        price = info.get("lastPrice") if hasattr(info, "get") else getattr(info, "last_price", None)
+    except Exception as exc:
+        # fast_info lazily fetches quote data the first time a field is
+        # accessed, and for a genuinely invalid/delisted ticker that fetch
+        # raises its own internal error rather than returning None the way
+        # a merely-missing field normally would -- live-caught testing
+        # this: a bad symbol raised a raw KeyError from deep inside
+        # yfinance's own scraper (self._md["currentTradingPeriod"]), which
+        # otherwise would have propagated uncaught past every caller that
+        # (reasonably) only expects this function to raise
+        # TickerNotFoundError for a bad ticker.
+        raise TickerNotFoundError(f"no current price available for ticker {ticker!r}: {exc}") from exc
     if not price:
         raise TickerNotFoundError(f"no current price available for ticker {ticker!r}")
     return float(price)

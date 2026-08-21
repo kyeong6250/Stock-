@@ -27,6 +27,7 @@ from stockoptions.data import (
 from stockoptions.news import get_ticker_news
 from stockoptions.rates import risk_free_rate
 from stockoptions.recommend import RecommendationError, recommend_trade
+from stockoptions.scanner import DEFAULT_WATCHLIST, scan_tickers
 from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts, truth_social_has_credentials
 from stockoptions.strategies import (
     breakevens,
@@ -343,6 +344,35 @@ def api_predict(
             {"day": p.day, "upper1": p.upper_1sd, "lower1": p.lower_1sd, "upper2": p.upper_2sd, "lower2": p.lower_2sd} for p in rec.cone
         ],
         "warnings": rec.warnings,
+    }
+
+
+@app.get("/api/scan")
+def api_scan(tickers: str = Query(""), horizon: int = 5, model: str = "logistic") -> dict:
+    """Scans a comma-separated ticker list, or DEFAULT_WATCHLIST if
+    `tickers` is omitted/blank. Unlike most endpoints here, a per-ticker
+    failure doesn't become an HTTP error -- one bad symbol shouldn't sink
+    a whole scan (same pattern as /api/influencers), so failures come
+    back as entries with an `error` field instead."""
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()] if tickers.strip() else DEFAULT_WATCHLIST
+    results = scan_tickers(ticker_list, horizon_days=horizon, model_type=model)
+    return {
+        "results": [
+            {
+                "ticker": r.ticker,
+                "price": r.price,
+                "volumeRatio": r.volume_ratio,
+                "ivHvRatio": r.iv_hv_ratio,
+                "read": r.read,
+                "direction": r.direction,
+                "liveProbability": r.live_probability,
+                "backtestAccuracy": r.backtest_accuracy,
+                "backtestBaseline": r.backtest_baseline,
+                "beatsBaseline": r.beats_baseline,
+                "error": r.error,
+            }
+            for r in results
+        ]
     }
 
 

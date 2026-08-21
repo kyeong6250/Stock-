@@ -25,6 +25,7 @@ from stockoptions.data import (
 from stockoptions.news import get_ticker_news
 from stockoptions.recommend import RecommendationError, recommend_trade
 from stockoptions.rates import get_yield_curve, risk_free_rate
+from stockoptions.scanner import DEFAULT_WATCHLIST, scan_tickers
 from stockoptions.strategies import breakevens, iron_condor, max_loss, max_profit, strangle, vertical_spread
 
 console = Console()
@@ -298,6 +299,50 @@ def cmd_predict(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_scan(args: argparse.Namespace) -> None:
+    tickers = args.tickers if args.tickers else DEFAULT_WATCHLIST
+    console.print(f"[dim]Scanning {len(tickers)} ticker(s)... this trains a model per ticker, give it a moment.[/dim]")
+    results = scan_tickers(tickers, horizon_days=args.horizon, model_type=args.model)
+
+    ok_results = [r for r in results if r.ok]
+    failed_results = [r for r in results if not r.ok]
+    sort_key = {
+        "volume": lambda r: -(r.volume_ratio or 0),
+        "iv": lambda r: -(r.iv_hv_ratio or 0),
+        "accuracy": lambda r: -(r.backtest_accuracy or 0),
+    }[args.sort_by]
+    ok_results.sort(key=sort_key)
+
+    sort_label = "relative volume" if args.sort_by == "volume" else args.sort_by
+    table = Table(title=f"Scan results (sorted by {sort_label})")
+    table.add_column("ticker")
+    table.add_column("price")
+    table.add_column("vol vs 20d avg")
+    table.add_column("IV/HV")
+    table.add_column("read")
+    table.add_column("model says")
+    table.add_column("backtest")
+    for r in ok_results:
+        vol_str = f"{r.volume_ratio:+.0%}" if r.volume_ratio is not None else "?"
+        model_str = f"{r.direction} ({r.live_probability:.0%})"
+        beats_str = "beats" if r.beats_baseline else "no edge"
+        bt_str = f"{r.backtest_accuracy:.0%} vs {r.backtest_baseline:.0%} ({beats_str})"
+        table.add_row(r.ticker, f"${r.price:.2f}", vol_str, f"{r.iv_hv_ratio:.2f}", r.read, model_str, bt_str)
+    console.print(table)
+
+    if failed_results:
+        console.print(f"[yellow]{len(failed_results)} ticker(s) skipped:[/yellow]")
+        for r in failed_results:
+            console.print(f"  [dim]{r.ticker}: {r.error}[/dim]")
+
+    console.print(
+        "[dim]\"vol vs 20d avg\" is real, computed relative volume -- the honest \"hot right now\" signal here, "
+        "not a claim sourced from anywhere. Run `stockoptions predict TICKER` on anything that looks interesting "
+        "for the full picture.[/dim]"
+    )
+    console.print(DISCLAIMER)
+
+
 def cmd_dashboard(args: argparse.Namespace) -> None:
     import webbrowser
 
@@ -395,6 +440,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_predict.add_argument("--delta", type=float, default=0.35, dest="delta", help="target |delta| for strike selection")
     p_predict.add_argument("--model", choices=["logistic", "random_forest"], default="logistic", dest="model", help="classifier type, see `backtest --model`")
     p_predict.set_defaults(func=cmd_predict)
+
+    p_scan = sub.add_parser(
+        "scan", help="scan several tickers at once and rank them by real relative volume (a default curated watchlist if no tickers given)"
+    )
+    p_scan.add_argument("tickers", nargs="*", help="tickers to scan; defaults to a curated watchlist of liquid large-caps if omitted")
+    p_scan.add_argument("--horizon", type=int, default=5, help="forward-looking days for the directional signal/backtest")
+    p_scan.add_argument("--model", choices=["logistic", "random_forest"], default="logistic")
+    p_scan.add_argument("--sort-by", choices=["volume", "iv", "accuracy"], default="volume", dest="sort_by")
+    p_scan.set_defaults(func=cmd_scan)
 
     p_dashboard = sub.add_parser("dashboard", help="launch the local web dashboard")
     p_dashboard.add_argument("--host", default="127.0.0.1")

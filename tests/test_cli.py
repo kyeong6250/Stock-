@@ -5,6 +5,7 @@ import pytest
 from stockoptions.backtest import BacktestResult
 from stockoptions.cli import build_parser, main
 from stockoptions.recommend import KellyEdge, RecommendationError, SelectedContract, TradeRecommendation
+from stockoptions.scanner import TickerScanResult
 
 
 def test_build_parser_does_not_raise():
@@ -146,3 +147,56 @@ def test_predict_command_reports_recommendation_errors_cleanly(capsys):
     out = capsys.readouterr().out
     assert "Traceback" not in out
     assert "no usable contracts" in out
+
+
+def test_scan_subcommand_defaults_to_no_explicit_tickers():
+    args = build_parser().parse_args(["scan"])
+    assert args.tickers == []
+    assert args.horizon == 5
+    assert args.model == "logistic"
+    assert args.sort_by == "volume"
+
+
+def test_scan_subcommand_parses_explicit_tickers_and_options():
+    args = build_parser().parse_args(["scan", "AAPL", "MSFT", "--sort-by", "iv", "--model", "random_forest"])
+    assert args.tickers == ["AAPL", "MSFT"]
+    assert args.sort_by == "iv"
+    assert args.model == "random_forest"
+
+
+def test_scan_command_uses_the_default_watchlist_when_no_tickers_given(monkeypatch, capsys):
+    from stockoptions.scanner import DEFAULT_WATCHLIST
+
+    monkeypatch.setattr("sys.argv", ["stockoptions", "scan"])
+    fake_results = [TickerScanResult(ticker=t, price=100.0, volume_ratio=0.1, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.5, backtest_baseline=0.5, beats_baseline=False) for t in DEFAULT_WATCHLIST]
+    with patch("stockoptions.cli.scan_tickers", return_value=fake_results) as mock_fn:
+        main()
+    mock_fn.assert_called_once_with(DEFAULT_WATCHLIST, horizon_days=5, model_type="logistic")
+    out = capsys.readouterr().out
+    assert DEFAULT_WATCHLIST[0] in out
+
+
+def test_scan_command_reports_failed_tickers_separately_from_the_table(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["stockoptions", "scan", "AAPL", "BADTICKER"])
+    fake_results = [
+        TickerScanResult(ticker="AAPL", price=100.0, volume_ratio=0.1, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.5, backtest_baseline=0.5, beats_baseline=False),
+        TickerScanResult(ticker="BADTICKER", error="no data found"),
+    ]
+    with patch("stockoptions.cli.scan_tickers", return_value=fake_results):
+        main()
+    out = capsys.readouterr().out
+    assert "AAPL" in out
+    assert "BADTICKER" in out
+    assert "no data found" in out
+
+
+def test_scan_command_sorts_by_the_requested_column(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["stockoptions", "scan", "LOW", "HIGH", "--sort-by", "accuracy"])
+    fake_results = [
+        TickerScanResult(ticker="LOW", price=100.0, volume_ratio=0.0, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.3, backtest_baseline=0.5, beats_baseline=False),
+        TickerScanResult(ticker="HIGH", price=100.0, volume_ratio=0.0, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.7, backtest_baseline=0.5, beats_baseline=True),
+    ]
+    with patch("stockoptions.cli.scan_tickers", return_value=fake_results):
+        main()
+    out = capsys.readouterr().out
+    assert out.index("HIGH") < out.index("LOW")  # higher accuracy sorts first

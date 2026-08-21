@@ -9,6 +9,7 @@ from stockoptions.backtest import BacktestResult, WalkForwardFold, WalkForwardRe
 from stockoptions.data import TickerNotFoundError
 from stockoptions.news import NewsItem
 from stockoptions.recommend import ConePoint, KellyEdge, RecommendationError, SelectedContract, TradeRecommendation
+from stockoptions.scanner import TickerScanResult
 from stockoptions.social import SocialFetchError, SocialPost
 from stockoptions.web.app import app
 
@@ -285,3 +286,53 @@ def test_backtest_endpoint_live():
     assert 0.0 <= body["accuracy"] <= 1.0
     assert len(body["dates"]) == len(body["strategyCurve"]) == len(body["buyHoldCurve"])
     assert abs(sum(body["featureImportance"].values()) - 1.0) < 1e-6
+
+
+def test_scan_endpoint_uses_default_watchlist_when_tickers_omitted():
+    from stockoptions.scanner import DEFAULT_WATCHLIST
+
+    fake = [
+        TickerScanResult(
+            ticker=t, price=100.0, volume_ratio=0.1, iv_hv_ratio=1.0, read="in line",
+            direction="up", live_probability=0.55, backtest_accuracy=0.5, backtest_baseline=0.5, beats_baseline=False,
+        )
+        for t in DEFAULT_WATCHLIST
+    ]
+    with patch("stockoptions.web.app.scan_tickers", return_value=fake) as mock_fn:
+        res = client.get("/api/scan")
+    assert res.status_code == 200
+    mock_fn.assert_called_once_with(DEFAULT_WATCHLIST, horizon_days=5, model_type="logistic")
+    body = res.json()
+    assert len(body["results"]) == len(DEFAULT_WATCHLIST)
+    assert body["results"][0]["ticker"] == DEFAULT_WATCHLIST[0]
+
+
+def test_scan_endpoint_parses_a_comma_separated_ticker_list():
+    fake = [TickerScanResult(ticker="AAPL", price=100.0, volume_ratio=0.1, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.5, backtest_baseline=0.5, beats_baseline=False)]
+    with patch("stockoptions.web.app.scan_tickers", return_value=fake) as mock_fn:
+        res = client.get("/api/scan?tickers=aapl, msft &horizon=10&model=random_forest")
+    assert res.status_code == 200
+    mock_fn.assert_called_once_with(["AAPL", "MSFT"], horizon_days=10, model_type="random_forest")
+
+
+def test_scan_endpoint_includes_failed_tickers_with_an_error_field_not_a_500():
+    fake = [
+        TickerScanResult(ticker="AAPL", price=100.0, volume_ratio=0.1, iv_hv_ratio=1.0, read="in line", direction="up", live_probability=0.55, backtest_accuracy=0.5, backtest_baseline=0.5, beats_baseline=False),
+        TickerScanResult(ticker="BADTICKER", error="no data found"),
+    ]
+    with patch("stockoptions.web.app.scan_tickers", return_value=fake):
+        res = client.get("/api/scan?tickers=AAPL,BADTICKER")
+    assert res.status_code == 200
+    body = res.json()
+    bad = next(r for r in body["results"] if r["ticker"] == "BADTICKER")
+    assert bad["error"] == "no data found"
+    assert bad["price"] is None
+
+
+@skip_unless_live
+def test_scan_endpoint_live():
+    res = client.get("/api/scan?tickers=AAPL,MSFT&horizon=5")
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["results"]) == 2
+    assert all(r["error"] is None for r in body["results"])
