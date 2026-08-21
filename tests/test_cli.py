@@ -1,6 +1,10 @@
+from unittest.mock import patch
+
 import pytest
 
+from stockoptions.backtest import BacktestResult
 from stockoptions.cli import build_parser, main
+from stockoptions.recommend import KellyEdge, RecommendationError, SelectedContract, TradeRecommendation
 
 
 def test_build_parser_does_not_raise():
@@ -61,3 +65,70 @@ def test_main_reports_value_errors_as_a_clean_message_not_a_traceback(monkeypatc
     err = capsys.readouterr().out  # rich console prints to stdout by default
     assert "Traceback" not in err
     assert "stockoptions: error" in err
+
+
+def test_predict_subcommand_parses_with_defaults():
+    args = build_parser().parse_args(["predict", "AAPL"])
+    assert args.ticker == "AAPL"
+    assert args.account_size == 10_000.0
+    assert args.risk_pct == 0.02
+    assert args.horizon == 35
+    assert args.delta == 0.35
+
+
+def _fake_recommendation():
+    bt = BacktestResult(
+        accuracy=0.55,
+        majority_baseline_accuracy=0.50,
+        n_train_samples=100,
+        n_test_samples=40,
+        strategy_total_return=0.1,
+        buy_and_hold_total_return=0.05,
+        strategy_sharpe=1.2,
+        strategy_max_drawdown=-0.05,
+        dates=["2026-01-01"],
+        strategy_equity_curve=[1.1],
+        buy_and_hold_equity_curve=[1.05],
+    )
+    contract = SelectedContract(
+        expiration="2026-09-25", dte=36, option_type="call", strike=325.0, premium=4.7, iv=0.245, delta=0.316, T=0.0986, r=0.037
+    )
+    edge = KellyEdge(sample_size=49, win_rate=0.33, avg_win=13.5, avg_loss=3.8, kelly_fraction=0.14, insufficient_sample=False)
+    return TradeRecommendation(
+        ticker="AAPL",
+        price=311.30,
+        direction="up",
+        live_probability=0.576,
+        backtest=bt,
+        contract=contract,
+        edge=edge,
+        kelly_multiplier=0.5,
+        max_risk_pct=0.02,
+        recommended_risk_fraction=0.02,
+        recommended_dollar_risk=2000.0,
+        recommended_contracts=4,
+        actual_dollar_risk=1880.0,
+        cone=[],
+        warnings=["some warning"],
+    )
+
+
+def test_predict_command_prints_the_recommendation_and_warnings(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["stockoptions", "predict", "AAPL"])
+    with patch("stockoptions.cli.recommend_trade", return_value=_fake_recommendation()) as mock_fn:
+        main()
+    out = capsys.readouterr().out
+    mock_fn.assert_called_once_with("AAPL", account_size=10_000.0, max_risk_pct=0.02, horizon_days=35, target_delta=0.35)
+    assert "AAPL" in out
+    assert "call" in out
+    assert "some warning" in out
+
+
+def test_predict_command_reports_recommendation_errors_cleanly(capsys):
+    with patch("stockoptions.cli.recommend_trade", side_effect=RecommendationError("no usable contracts")):
+        with pytest.raises(SystemExit) as exc_info:
+            build_parser().parse_args(["predict", "ZZZZZZ"]).func(build_parser().parse_args(["predict", "ZZZZZZ"]))
+    assert exc_info.value.code == 2
+    out = capsys.readouterr().out
+    assert "Traceback" not in out
+    assert "no usable contracts" in out

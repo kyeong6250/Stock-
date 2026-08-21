@@ -34,7 +34,7 @@ have one.
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin
@@ -50,12 +50,23 @@ class SocialFetchError(RuntimeError):
 
 
 @dataclass
+class SocialComment:
+    author: str
+    text: str
+    favourites_count: int
+    url: str
+    posted_at: datetime | None
+
+
+@dataclass
 class SocialPost:
     platform: str  # "truth_social" | "x"
     author: str
     text: str
     url: str
     posted_at: datetime | None
+    id: str | None = None
+    top_comments: list[SocialComment] = field(default_factory=list)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -66,13 +77,16 @@ def _strip_html(html: str) -> str:
     return text.replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", '"').strip()
 
 
-def get_truth_social_posts(username: str, limit: int = 10) -> list[SocialPost]:
-    """Recent posts from a public Truth Social account, e.g. "realDonaldTrump".
-    Works with no credentials for reading a public account; set
-    TRUTHSOCIAL_USERNAME/PASSWORD in .env for authenticated (higher-limit)
-    access. Raises SocialFetchError on any truthbrush failure (blocked,
-    geoblocked, bad login, network) rather than letting a bare exception
-    from a third-party scraper surface to callers."""
+def truth_social_has_credentials() -> bool:
+    """Whether TRUTHSOCIAL_USERNAME/PASSWORD are set -- comment-pulling
+    needs these even when just reading a public account's own posts
+    doesn't, so callers can decide whether to ask for comments up front
+    rather than hitting a SocialFetchError."""
+    load_dotenv()
+    return bool(os.environ.get("TRUTHSOCIAL_USERNAME") and os.environ.get("TRUTHSOCIAL_PASSWORD"))
+
+
+def _truthbrush_api():
     try:
         from truthbrush.api import Api, CFBlockException, GeoblockException, LoginErrorException
     except ImportError as exc:
@@ -82,12 +96,39 @@ def get_truth_social_posts(username: str, limit: int = 10) -> list[SocialPost]:
     ts_user = os.environ.get("TRUTHSOCIAL_USERNAME")
     ts_pass = os.environ.get("TRUTHSOCIAL_PASSWORD")
     api = Api(username=ts_user, password=ts_pass, require_auth=bool(ts_user and ts_pass))
+    return api, bool(ts_user and ts_pass), (CFBlockException, GeoblockException, LoginErrorException)
 
+
+def get_truth_social_posts(username: str, limit: int = 20, include_top_comments: bool = False, top_comments_n: int = 3) -> list[SocialPost]:
+    """Recent posts from a public Truth Social account, e.g. "realDonaldTrump".
+    Works with no credentials for reading a public account; set
+    TRUTHSOCIAL_USERNAME/PASSWORD in .env for authenticated (higher-limit)
+    access. Raises SocialFetchError on any truthbrush failure (blocked,
+    geoblocked, bad login, network) rather than letting a bare exception
+    from a third-party scraper surface to callers.
+
+    `include_top_comments`: attaches each post's top `top_comments_n`
+    replies by like count (see get_truth_social_top_comments -- this
+    calls it once per post, so it's slower and, unlike reading the posts
+    themselves, requires TRUTHSOCIAL_USERNAME/PASSWORD to be set; raises
+    immediately if they aren't, rather than silently returning posts with
+    no comments when comments were explicitly asked for."""
+    if include_top_comments:
+        load_dotenv()
+        if not (os.environ.get("TRUTHSOCIAL_USERNAME") and os.environ.get("TRUTHSOCIAL_PASSWORD")):
+            raise SocialFetchError(
+                "include_top_comments=True needs TRUTHSOCIAL_USERNAME/PASSWORD in .env -- reading "
+                "comments requires an authenticated login even for a public post, unlike reading "
+                "the post itself."
+            )
+
+    api, _, block_exceptions = _truthbrush_api()
     posts = []
     try:
         for raw in api.pull_statuses(username, replies=False):
             if len(posts) >= limit:
                 break
+            post_id = str(raw.get("id")) if raw.get("id") is not None else None
             posts.append(
                 SocialPost(
                     platform="truth_social",
@@ -95,15 +136,61 @@ def get_truth_social_posts(username: str, limit: int = 10) -> list[SocialPost]:
                     text=_strip_html(raw.get("content", "")),
                     url=raw.get("url") or f"https://truthsocial.com/@{username}",
                     posted_at=_parse_iso8601(raw.get("created_at")),
+                    id=post_id,
                 )
             )
-    except (CFBlockException, GeoblockException, LoginErrorException) as exc:
+    except block_exceptions as exc:
         raise SocialFetchError(f"Truth Social blocked this request ({type(exc).__name__}): {exc}") from exc
     except SocialFetchError:
         raise
     except Exception as exc:  # truthbrush doesn't expose one common base exception for every failure mode
         raise SocialFetchError(f"failed to pull Truth Social posts for {username!r}: {exc}") from exc
+
+    if include_top_comments:
+        for post in posts:
+            if post.id:
+                post.top_comments = get_truth_social_top_comments(post.id, top_n=top_comments_n)
     return posts
+
+
+def get_truth_social_top_comments(post_id: str, top_n: int = 3, scan_limit: int = 40) -> list[SocialComment]:
+    """Top `top_n` replies to a Truth Social post, ranked by like count.
+    Requires TRUTHSOCIAL_USERNAME/PASSWORD in .env -- truthbrush's
+    comment-pulling endpoint needs an authenticated login regardless of
+    whether the parent post itself is public. truthbrush only fetches
+    replies oldest-first server-side (its own source has a TODO noting
+    rating-based sort isn't implemented there); "top-rated" here is a
+    client-side sort by favourites_count over the most recent
+    `scan_limit` replies, not a guarantee of surfacing the single
+    most-liked reply out of a post with thousands of comments."""
+    api, authenticated, block_exceptions = _truthbrush_api()
+    if not authenticated:
+        raise SocialFetchError(
+            "reading comments needs TRUTHSOCIAL_USERNAME/PASSWORD in .env, even for a public post."
+        )
+
+    comments = []
+    try:
+        for raw in api.pull_comments(post_id, top_num=scan_limit):
+            account = raw.get("account") or {}
+            comments.append(
+                SocialComment(
+                    author=account.get("username", "?"),
+                    text=_strip_html(raw.get("content", "")),
+                    favourites_count=int(raw.get("favourites_count") or 0),
+                    url=raw.get("url") or "",
+                    posted_at=_parse_iso8601(raw.get("created_at")),
+                )
+            )
+    except block_exceptions as exc:
+        raise SocialFetchError(f"Truth Social blocked this request ({type(exc).__name__}): {exc}") from exc
+    except SocialFetchError:
+        raise
+    except Exception as exc:
+        raise SocialFetchError(f"failed to pull comments for post {post_id!r}: {exc}") from exc
+
+    comments.sort(key=lambda c: c.favourites_count, reverse=True)
+    return comments[:top_n]
 
 
 def _parse_iso8601(value: str | None) -> datetime | None:
@@ -123,7 +210,7 @@ def _parse_iso8601(value: str | None) -> datetime | None:
 _GATE_MARKERS = ("rss reader not", "not yet whitelisted", "access denied", "please enable js", "checking your browser")
 
 
-def get_x_posts(username: str, limit: int = 10) -> list[SocialPost]:
+def get_x_posts(username: str, limit: int = 20) -> list[SocialPost]:
     """Recent posts from an X/Twitter account, via a Nitter-style RSS
     mirror. Off by default -- set NITTER_INSTANCE_URL to a working
     instance (see this module's docstring for why none is bundled: every

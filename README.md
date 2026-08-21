@@ -11,6 +11,11 @@ you should actually trust:
 3. **A directional up/down signal with a backtester** — the one genuinely
    weak piece, and it's built to say so out loud. See
    [Honest results](#honest-results-not-cherry-picked) below.
+4. **A trade recommender** (`stockoptions predict`) built on top of (3) —
+   a specific contract and position size, not just up/down. See
+   [Trade recommender](#trade-recommender) below for exactly what part of
+   this is real math (contract mechanics, Kelly-criterion sizing) versus
+   still inheriting (3)'s weak directional edge.
 
 No model here reliably predicts short-term stock direction. That's not a
 limitation of this particular implementation — markets are close to
@@ -82,6 +87,10 @@ stockoptions screen AAPL MSFT
 
 # Backtest the directional signal against honest baselines
 stockoptions backtest AAPL --period 2y --horizon 5
+
+# A concrete trade suggestion: contract + Kelly-sized position count (see
+# the Trade recommender section below before trusting the sizing)
+stockoptions predict AAPL --account-size 100000 --risk-pct 2 --horizon 35
 
 # Pull tickers from your Robinhood watchlist, then screen them (needs .env, see below)
 stockoptions watchlist
@@ -187,6 +196,70 @@ Sources: [risk-free rate maturity matching](https://fastercapital.com/content/Th
 [binomial vs. Black-Scholes for American options](https://mbrenndoerfer.com/writing/binomial-tree-option-pricing-cox-ross-rubinstein),
 [walk-forward validation and label leakage](https://blog.quantinsti.com/walk-forward-optimization-python-xgboost-stock-prediction/).
 
+## Trade recommender
+
+```sh
+stockoptions predict AAPL --account-size 100000 --risk-pct 2 --horizon 35 --delta 0.35
+```
+
+Also on the dashboard's "Predict" panel, with a price-projection chart.
+This answers the question the rest of the project deliberately stops
+short of: not just "is this ticker's directional signal up or down," but
+"which specific contract, and how many." Two genuinely different kinds
+of claim get made here, and it matters which is which:
+
+**Real, reliable regardless of the signal's accuracy:**
+- **Contract selection** is standard practitioner mechanics: the
+  expiration nearest a 30-45 day target (the conventional "theta high,
+  gamma low" sweet spot for a multi-week directional hold — confirmed
+  while researching this: front-month options have aggressive theta
+  curves, while 30-45 DTE keeps decay roughly linear until the last
+  2-3 weeks), and the strike whose recomputed delta is closest to a
+  target (0.30-0.40 delta is the standard directional-trader range,
+  balancing cost against probability of finishing ITM).
+- **Position sizing is a real Kelly-criterion calculation**
+  (`f* = win_rate - (1 - win_rate) / payout_ratio`, half-Kelly applied by
+  default since full Kelly is known to be too aggressive for real
+  drawdowns), fed an *empirical* edge estimate: rather than assuming a
+  payout ratio, `recommend.py` replays `backtest.py`'s own purged-gap,
+  no-lookahead test-period rows through the chosen contract's moneyness
+  and current IV via the binomial pricing model, to see what buying this
+  shape of contract would actually have paid off historically whenever
+  the model predicted today's exact direction. The one disclosed
+  approximation: no free source of historical implied volatility exists,
+  so *today's* IV stands in for every historical date's IV in that
+  replay.
+- The **price-projection chart** is the standard "expected move" cone
+  used across options platforms (Barchart, tastytrade, projectoption,
+  etc.): `expected_move(t) = price × IV × √(t / 365)`, giving a
+  1-standard-deviation band (~68%) and 2-standard-deviation band (~95%)
+  that widens with time. It's a probability *range* derived from the
+  market's own priced-in volatility, not a prediction of where the price
+  will land — shown as a widening cone specifically so the uncertainty
+  stays visible instead of implying false precision.
+
+**Still inherits (3)'s weak edge, and is built to say so:** the
+*direction* being sized is still today's live call from the same
+directional classifier `backtest.py` already shows, honestly, often
+failing to beat a majority-class baseline. Real Kelly math fed a weak or
+negative edge does the right thing on its own — it recommends risking
+little or nothing, which is exactly what you'll see on tickers/horizons
+where the signal has no real edge, not a separate safety check
+second-guessing the math. `TradeRecommendation.warnings` spells out
+*why* whenever that happens: backtest accuracy not beating its baseline,
+too few historical instances matching today's predicted direction to
+trust the sizing (`n` is always shown), a Kelly fraction at or below
+zero, or a recommended size that rounds down to 0 contracts at your
+account size and risk cap. None of that is the tool being unhelpful —
+it's the same "48.9% accuracy, below a coin flip" honesty from the
+Honest results section above, applied to position sizing instead of a
+bare backtest number.
+
+Sources: [delta selection for directional trades](https://pomegra.io/learn/library/track-e-trading-risk/options-beginners/chapter-11-choosing-strikes-and-expiries/delta-selection-guide),
+[DTE selection and theta decay](https://www.daystoexpiry.com/blog/theta-decay-dte-guide),
+[Kelly criterion for position sizing](https://longbridge.com/en/academy/options/blog/options-position-sizing-kelly-criterion-explained-100160),
+[expected-move probability cones](https://gocharting.com/docs/options-desk/options-probability-cone).
+
 ## Why recompute IV instead of trusting yfinance's own column?
 
 Pull a deep ITM options chain from yfinance and check its
@@ -265,7 +338,17 @@ integration above, read before using:
   truthbrush's own "publicly accessible" framing makes this
   ToS-compliant is a real, unresolved question this project doesn't
   settle for you. Optional `TRUTHSOCIAL_USERNAME`/`PASSWORD` in `.env`
-  switch to authenticated mode for higher rate limits.
+  switch to authenticated mode for higher rate limits (default pull is
+  now 20 posts, up from an earlier, too-thin 10) -- and, only with those
+  credentials set, also unlock each post's top few comments by like
+  count (`--comments` on the CLI, shown automatically on the dashboard
+  when credentials are present). Reading a public account's own posts
+  needs no login; reading *comments* on a post does, even a public one --
+  a real asymmetry in truthbrush's underlying API, not a design choice
+  here. truthbrush itself only fetches replies oldest-first server-side,
+  so "top-rated" is this project's own client-side sort by like count
+  over a batch of recent replies, not a guarantee of surfacing the single
+  most-liked reply on a post with thousands of comments.
 - **X (Twitter)** is **off by default and not expected to work**. X's
   official API has no meaningful free tier, and free scraping mirrors
   (Nitter) have almost entirely collapsed under X's anti-scraping
@@ -286,8 +369,10 @@ integration above, read before using:
 Covers: Black-Scholes pricing/Greeks/IV, multi-leg strategy payoffs
 (vertical spreads, strangles, straddles, iron condors, covered calls),
 IV-vs-realized-vol screening, a backtested (honestly, against baselines)
-directional signal, and an informational news/influencer panel (see
-News & influencer tracking above -- explicitly not part of the signal).
+directional signal, a Kelly-sized trade recommender built on top of that
+signal (see Trade recommender above), and an informational news/
+influencer panel (see News & influencer tracking above -- explicitly not
+part of the signal).
 
 Doesn't cover: Special Monthly Compensation-style exotic payoffs, real
 order execution, portfolio-level margin/risk, or anything requiring a
@@ -307,6 +392,7 @@ data.py           yfinance wrapper w/ local caching + IV/Greeks recompute
 analysis.py       screen_ticker() -- shared by the CLI and the dashboard
 signals.py        technical features + scaled logistic regression classifier
 backtest.py       purged-gap train/test backtest vs. honest baselines
+recommend.py      contract selection + empirical-Kelly position sizing + expected-move cone
 robinhood.py      read-only watchlist/positions pull (optional)
 news.py           ticker/market news, informational only (yfinance + optional Finnhub)
 social.py         unofficial read-only influencer post pulls (optional, real ToS risk)

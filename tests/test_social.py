@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts
+from stockoptions.social import SocialFetchError, get_truth_social_posts, get_truth_social_top_comments, get_x_posts
 
 # ---------------------------------------------------------------------
 # Truth Social (truthbrush)
@@ -101,6 +101,70 @@ def test_get_truth_social_posts_respects_limit():
     with patch.dict(sys.modules, {"truthbrush.api": fake_module}):
         posts = get_truth_social_posts("someuser", limit=3)
     assert len(posts) == 3
+
+
+def test_get_truth_social_posts_raises_when_comments_requested_without_credentials(monkeypatch):
+    monkeypatch.delenv("TRUTHSOCIAL_USERNAME", raising=False)
+    monkeypatch.delenv("TRUTHSOCIAL_PASSWORD", raising=False)
+    with pytest.raises(SocialFetchError, match="TRUTHSOCIAL_USERNAME"):
+        get_truth_social_posts("realDonaldTrump", include_top_comments=True)
+
+
+def test_get_truth_social_top_comments_raises_without_credentials(monkeypatch):
+    monkeypatch.delenv("TRUTHSOCIAL_USERNAME", raising=False)
+    monkeypatch.delenv("TRUTHSOCIAL_PASSWORD", raising=False)
+    with pytest.raises(SocialFetchError, match="needs TRUTHSOCIAL_USERNAME"):
+        get_truth_social_top_comments("12345")
+
+
+def test_get_truth_social_top_comments_sorts_by_favourites_count_descending(monkeypatch):
+    monkeypatch.setenv("TRUTHSOCIAL_USERNAME", "someone")
+    monkeypatch.setenv("TRUTHSOCIAL_PASSWORD", "hunter2")
+
+    raw_comments = [
+        {"account": {"username": "low"}, "content": "<p>meh</p>", "favourites_count": 3, "url": "u1", "created_at": None},
+        {"account": {"username": "top"}, "content": "<p>great point</p>", "favourites_count": 500, "url": "u2", "created_at": None},
+        {"account": {"username": "mid"}, "content": "<p>ok</p>", "favourites_count": 40, "url": "u3", "created_at": None},
+    ]
+    fake_api = MagicMock()
+    fake_api.pull_comments.return_value = iter(raw_comments)
+    fake_module = MagicMock()
+    fake_module.Api = MagicMock(return_value=fake_api)
+    fake_module.CFBlockException = type("CFBlockException", (Exception,), {})
+    fake_module.GeoblockException = type("GeoblockException", (Exception,), {})
+    fake_module.LoginErrorException = type("LoginErrorException", (Exception,), {})
+
+    with patch.dict(sys.modules, {"truthbrush.api": fake_module}):
+        comments = get_truth_social_top_comments("12345", top_n=2)
+
+    assert [c.author for c in comments] == ["top", "mid"]
+    assert comments[0].favourites_count == 500
+
+
+def test_get_truth_social_posts_attaches_top_comments_when_requested(monkeypatch):
+    monkeypatch.setenv("TRUTHSOCIAL_USERNAME", "someone")
+    monkeypatch.setenv("TRUTHSOCIAL_PASSWORD", "hunter2")
+
+    fake_statuses = iter([{"id": 999, "content": "<p>main post</p>", "created_at": None, "url": "https://x/999"}])
+    raw_comments = [{"account": {"username": "top"}, "content": "<p>reply</p>", "favourites_count": 10, "url": "u1", "created_at": None}]
+
+    fake_api = MagicMock()
+    fake_api.pull_statuses.return_value = fake_statuses
+    fake_api.pull_comments.return_value = iter(raw_comments)
+    fake_module = MagicMock()
+    fake_module.Api = MagicMock(return_value=fake_api)
+    fake_module.CFBlockException = type("CFBlockException", (Exception,), {})
+    fake_module.GeoblockException = type("GeoblockException", (Exception,), {})
+    fake_module.LoginErrorException = type("LoginErrorException", (Exception,), {})
+
+    with patch.dict(sys.modules, {"truthbrush.api": fake_module}):
+        posts = get_truth_social_posts("someuser", include_top_comments=True, top_comments_n=1)
+
+    assert len(posts) == 1
+    assert posts[0].id == "999"
+    assert len(posts[0].top_comments) == 1
+    assert posts[0].top_comments[0].author == "top"
+    fake_api.pull_comments.assert_called_once_with("999", top_num=40)
 
 
 # ---------------------------------------------------------------------

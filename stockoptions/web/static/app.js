@@ -213,6 +213,198 @@ function renderLineChart(container, series, opts = {}) {
   });
 }
 
+// ---------------- forecast cone chart ----------------
+// A dedicated renderer (not renderLineChart above) because the shape is
+// different in kind, not just data: a trailing price line meeting a
+// widening probability band at "today," rather than N parallel series
+// over the same x-range. The band is the whole point -- it's what makes
+// this a "here's a plausible range, with explicitly shown uncertainty"
+// chart instead of a single confident-looking line pretending to know
+// the future.
+
+function renderForecastChart(container, historyRows, cone, S) {
+  const width = container.clientWidth || 600;
+  const height = container.clientHeight || 280;
+  const padding = { top: 10, right: 14, bottom: 24, left: 54 };
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+
+  const histN = historyRows.length;
+  const todayIdx = histN - 1;
+  const totalN = histN + cone.length;
+
+  const allYs = [...historyRows.map((r) => r.close), ...cone.map((p) => p.lower2), ...cone.map((p) => p.upper2)];
+  const yMin = Math.min(...allYs);
+  const yMax = Math.max(...allYs);
+  const yPad = (yMax - yMin) * 0.08 || Math.abs(S) * 0.05 || 1;
+  const y0 = yMin - yPad;
+  const y1 = yMax + yPad;
+
+  const xScale = (i) => padding.left + (totalN <= 1 ? innerW / 2 : (i / (totalN - 1)) * innerW);
+  const yScale = (v) => padding.top + innerH - ((v - y0) / (y1 - y0)) * innerH;
+  const coneX = (day) => xScale(todayIdx + day);
+
+  const parts = [];
+  const gridLines = 4;
+  for (let g = 0; g <= gridLines; g++) {
+    const v = y0 + (g / gridLines) * (y1 - y0);
+    const y = yScale(v);
+    parts.push(`<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#232b25" stroke-width="1" />`);
+    parts.push(`<text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#8b978f">$${v.toFixed(0)}</text>`);
+  }
+
+  function band(upperKey, lowerKey) {
+    const start = `${xScale(todayIdx).toFixed(2)},${yScale(S).toFixed(2)}`;
+    const upper = cone.map((p) => `${coneX(p.day).toFixed(2)},${yScale(p[upperKey]).toFixed(2)}`).join(" ");
+    const lower = cone
+      .slice()
+      .reverse()
+      .map((p) => `${coneX(p.day).toFixed(2)},${yScale(p[lowerKey]).toFixed(2)}`)
+      .join(" ");
+    return `${start} ${upper} ${lower} ${start}`;
+  }
+  parts.push(`<polygon points="${band("upper2", "lower2")}" fill="#34d399" opacity="0.12" />`);
+  parts.push(`<polygon points="${band("upper1", "lower1")}" fill="#34d399" opacity="0.22" />`);
+
+  parts.push(
+    `<line x1="${xScale(todayIdx)}" y1="${yScale(S)}" x2="${coneX(cone[cone.length - 1].day)}" y2="${yScale(S)}" stroke="#8b978f" stroke-width="1.25" stroke-dasharray="4 3" />`
+  );
+  parts.push(
+    `<line x1="${xScale(todayIdx)}" y1="${padding.top}" x2="${xScale(todayIdx)}" y2="${padding.top + innerH}" stroke="#eef2ef" stroke-width="1" stroke-dasharray="2 2" opacity="0.35" />`
+  );
+  parts.push(`<text x="${xScale(todayIdx) + 4}" y="${padding.top + 12}" font-size="10" fill="#8b978f">today</text>`);
+
+  const histPath = historyRows.map((r, i) => `${i === 0 ? "M" : "L"} ${xScale(i).toFixed(2)} ${yScale(r.close).toFixed(2)}`).join(" ");
+  parts.push(`<path d="${histPath}" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`);
+
+  const hoverLineId = `hover-${Math.random().toString(36).slice(2)}`;
+  parts.push(`<line id="${hoverLineId}" x1="0" y1="${padding.top}" x2="0" y2="${padding.top + innerH}" stroke="#eef2ef" stroke-width="1" opacity="0" />`);
+
+  container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${parts.join("")}</svg>`;
+
+  if (!prefersReducedMotion()) {
+    const historyPath = container.querySelector("svg path");
+    if (historyPath) {
+      const length = historyPath.getTotalLength();
+      historyPath.style.strokeDasharray = `${length}`;
+      historyPath.style.strokeDashoffset = `${length}`;
+      historyPath.getBoundingClientRect();
+      historyPath.style.transition = "stroke-dashoffset 0.7s ease-out";
+      requestAnimationFrame(() => {
+        historyPath.style.strokeDashoffset = "0";
+      });
+    }
+    const polygons = container.querySelectorAll("svg polygon");
+    polygons.forEach((poly, i) => {
+      poly.style.opacity = "0";
+      poly.style.transition = `opacity 0.4s ease-out ${0.5 + i * 0.1}s`;
+      requestAnimationFrame(() => {
+        poly.style.opacity = i === 0 ? "0.12" : "0.22";
+      });
+    });
+  }
+
+  const tooltip = document.createElement("div");
+  tooltip.style.cssText =
+    "position:absolute;pointer-events:none;background:#171d18;border:1px solid #232b25;border-radius:8px;padding:8px 10px;font-size:12px;display:none;white-space:nowrap;z-index:5;";
+  container.style.position = "relative";
+  container.appendChild(tooltip);
+  const hoverLine = container.querySelector(`#${hoverLineId}`);
+
+  container.addEventListener("mousemove", (e) => {
+    const rect = container.getBoundingClientRect();
+    const relX = ((e.clientX - rect.left) / rect.width) * width;
+    const i = Math.max(0, Math.min(totalN - 1, Math.round(((relX - padding.left) / innerW) * (totalN - 1))));
+    hoverLine.setAttribute("x1", xScale(i));
+    hoverLine.setAttribute("x2", xScale(i));
+    hoverLine.setAttribute("opacity", "1");
+
+    let label, lines;
+    if (i <= todayIdx) {
+      label = historyRows[i].date;
+      lines = [`<div><span style="color:#60a5fa">&#9679;</span> Close: $${historyRows[i].close.toFixed(2)}</div>`];
+    } else {
+      const p = cone[i - todayIdx - 1];
+      label = `+${p.day}d`;
+      lines = [
+        `<div><span style="color:#34d399">&#9679;</span> &plusmn;1&sigma;: $${p.lower1.toFixed(2)} &ndash; $${p.upper1.toFixed(2)}</div>`,
+        `<div><span style="color:#34d399;opacity:.5">&#9679;</span> &plusmn;2&sigma;: $${p.lower2.toFixed(2)} &ndash; $${p.upper2.toFixed(2)}</div>`,
+      ];
+    }
+    tooltip.innerHTML = `<div style="color:#8b978f;margin-bottom:4px;">${escapeHtml(label)}</div>${lines.join("")}`;
+    tooltip.style.display = "block";
+    tooltip.style.left = `${Math.min(relX - padding.left > innerW / 2 ? relX - 150 : relX + 12, width - 160)}px`;
+    tooltip.style.top = "8px";
+  });
+  container.addEventListener("mouseleave", () => {
+    hoverLine.setAttribute("opacity", "0");
+    tooltip.style.display = "none";
+  });
+}
+
+// ---------------- predict ----------------
+
+async function loadPredict(ticker) {
+  const accountSize = parseFloat(document.getElementById("predict-account").value) || 10000;
+  const riskPct = (parseFloat(document.getElementById("predict-risk").value) || 2) / 100;
+  const horizon = parseInt(document.getElementById("predict-horizon").value, 10) || 35;
+  const targetDelta = parseFloat(document.getElementById("predict-delta").value) || 0.35;
+
+  const btn = document.querySelector("#predict-form button");
+  btn.disabled = true;
+  setStatus(`Building a trade recommendation for ${ticker}...`);
+  try {
+    const [rec, historyRows] = await Promise.all([
+      apiGet(`/api/predict/${ticker}?account_size=${accountSize}&risk_pct=${riskPct}&horizon=${horizon}&delta=${targetDelta}`),
+      apiGet(`/api/history/${ticker}?period=3mo`),
+    ]);
+    setStatus("");
+    renderPredictResult(rec, historyRows);
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderPredictResult(rec, historyRows) {
+  document.getElementById("predict-results").classList.remove("hidden");
+
+  const warningsEl = document.getElementById("predict-warnings");
+  warningsEl.innerHTML = rec.warnings.length
+    ? rec.warnings.map((w) => `<div class="predict-warning"><span class="predict-warning-icon">!</span><span>${escapeHtml(w)}</span></div>`).join("")
+    : `<div class="predict-none-card">No sizing warnings triggered for this ticker/horizon -- still not a guarantee, just no flagged red light.</div>`;
+
+  document.getElementById("predict-direction").textContent = rec.direction === "up" ? "Bullish (call)" : "Bearish (put)";
+  document.getElementById("predict-confidence").textContent = `${(rec.liveProbability * 100).toFixed(1)}% model confidence`;
+
+  document.getElementById("predict-accuracy").textContent = `${(rec.backtest.accuracy * 100).toFixed(1)}% / ${(rec.backtest.baseline * 100).toFixed(1)}%`;
+
+  document.getElementById("predict-kelly").textContent = pct(rec.edge.kellyFraction);
+  document.getElementById("predict-kelly-sub").textContent = `win rate ${pct(rec.edge.winRate)}, n=${rec.edge.sampleSize}`;
+
+  document.getElementById("predict-size").textContent = `${rec.sizing.contracts} contract${rec.sizing.contracts === 1 ? "" : "s"}`;
+  document.getElementById("predict-size-sub").textContent = `${money(rec.sizing.actualDollarRisk)} of ${money(rec.sizing.dollarBudget)} budget`;
+  const sizeCard = document.getElementById("predict-size-card");
+  sizeCard.classList.remove("good", "neutral");
+  sizeCard.classList.add(rec.sizing.contracts > 0 ? "good" : "neutral");
+
+  const c = rec.contract;
+  document.getElementById("predict-contract").innerHTML = `
+    <div><span class="meta-label">Contract</span><span class="meta-value">${escapeHtml(rec.ticker)} ${escapeHtml(c.optionType)} $${c.strike.toFixed(2)}</span></div>
+    <div><span class="meta-label">Expiration</span><span class="meta-value">${escapeHtml(c.expiration)} (${c.dte}d)</span></div>
+    <div><span class="meta-label">Premium</span><span class="meta-value">$${c.premium.toFixed(2)} ($${(c.premium * 100).toFixed(2)}/contract)</span></div>
+    <div><span class="meta-label">IV / delta</span><span class="meta-value">${pct(c.iv)} / ${c.delta.toFixed(3)}</span></div>
+  `;
+
+  renderForecastChart(document.getElementById("predict-chart"), historyRows, rec.cone, rec.price);
+}
+
+document.getElementById("predict-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  loadPredict(state.ticker);
+});
+
 // ---------------- overview ----------------
 
 async function loadOverview(ticker) {
@@ -295,10 +487,23 @@ async function loadNews(ticker) {
   }
 }
 
+function renderTopComments(comments) {
+  if (!comments || !comments.length) return "";
+  const rows = comments
+    .map(
+      (c) => `<div class="influencer-comment">
+        <span class="influencer-comment-meta">@${escapeHtml(c.author)} &middot; ${c.favouritesCount.toLocaleString()} likes</span>
+        <a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.text || "(no text)")}</a>
+      </div>`
+    )
+    .join("");
+  return `<div class="influencer-comments"><div class="influencer-comments-label">Top comments</div>${rows}</div>`;
+}
+
 async function loadInfluencers() {
   const container = document.getElementById("influencer-list");
   try {
-    const entries = await apiGet(`/api/influencers?limit=4`);
+    const entries = await apiGet(`/api/influencers?limit=12`);
     container.innerHTML = entries
       .map((entry) => {
         const platformLabel = entry.platform === "truth" ? "Truth Social" : "X";
@@ -309,9 +514,12 @@ async function loadInfluencers() {
         const posts = entry.posts.length
           ? entry.posts
               .map(
-                (p) => `<a class="influencer-post" href="${safeUrl(p.url)}" target="_blank" rel="noopener">
-                  <span class="influencer-post-time">${escapeHtml(formatPostTime(p.postedAt))}</span>${escapeHtml(p.text || "(no text)")}
-                </a>`
+                (p) => `<div class="influencer-post">
+                  <a href="${safeUrl(p.url)}" target="_blank" rel="noopener">
+                    <span class="influencer-post-time">${escapeHtml(formatPostTime(p.postedAt))}</span>${escapeHtml(p.text || "(no text)")}
+                  </a>
+                  ${renderTopComments(p.topComments)}
+                </div>`
               )
               .join("")
           : `<div class="influencer-unavailable">No recent posts found.</div>`;

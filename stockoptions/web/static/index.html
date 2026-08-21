@@ -18,6 +18,7 @@
       <a href="#strategy" class="side-link" data-section="strategy">Strategy builder</a>
       <a href="#backtest" class="side-link" data-section="backtest">Backtest</a>
       <a href="#news" class="side-link" data-section="news">News &amp; catalysts</a>
+      <a href="#predict" class="side-link" data-section="predict">Predict</a>
     </nav>
     <div class="sidebar-disclaimer">
       For education/fun, not investment advice. No model here reliably
@@ -150,6 +151,51 @@
         </div>
         <p class="fine-print" style="margin-top: -6px;">Unofficial, read-only pulls of a fixed, curated watchlist &mdash; see the README's News section for exactly what's scraped, from where, and the real ToS/reliability risk of each source before trusting this for anything beyond curiosity.</p>
         <div id="influencer-list" class="influencer-grid"><p class="fine-print">Loading&hellip;</p></div>
+      </div>
+    </section>
+
+    <section id="predict" class="panel hidden">
+      <h1>Predict</h1>
+      <p class="panel-intro">A concrete trade suggestion, not just an up/down guess: which contract, and how many, sized by a real Kelly-criterion calculation fed a small-sample historical edge estimate. It will often -- correctly -- recommend risking little or nothing; that's the math finding no edge, not a bug. See the README's Trade recommender section before trusting any number here.</p>
+
+      <div class="card">
+        <form id="predict-form" class="backtest-form">
+          <label>Account size ($) <input id="predict-account" type="number" value="10000" min="100" step="100" /></label>
+          <label>Max risk <input id="predict-risk" type="number" value="2" min="0.1" max="100" step="0.1" />%</label>
+          <label>Horizon (days) <input id="predict-horizon" type="number" value="35" min="5" max="180" /></label>
+          <label>Target delta <input id="predict-delta" type="number" value="0.35" min="0.05" max="0.95" step="0.05" /></label>
+          <button type="submit" class="btn btn-primary">Recommend a trade</button>
+        </form>
+      </div>
+
+      <div id="predict-results" class="hidden">
+        <div id="predict-warnings"></div>
+
+        <div class="stat-grid" id="predict-stat-grid">
+          <div class="stat-card stat-card-hero"><div class="stat-label">Direction</div><div class="stat-value" id="predict-direction">&mdash;</div><div class="stat-sub" id="predict-confidence"></div></div>
+          <div class="stat-card"><div class="stat-label">Backtest accuracy / baseline</div><div class="stat-value" id="predict-accuracy">&mdash;</div></div>
+          <div class="stat-card"><div class="stat-label">Empirical edge (Kelly f*)</div><div class="stat-value" id="predict-kelly">&mdash;</div><div class="stat-sub" id="predict-kelly-sub"></div></div>
+          <div class="stat-card" id="predict-size-card"><div class="stat-label">Recommended size</div><div class="stat-value" id="predict-size">&mdash;</div><div class="stat-sub" id="predict-size-sub"></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Suggested contract</h2>
+          </div>
+          <div class="meta-card" id="predict-contract"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Price projection</h2>
+            <div class="legend">
+              <span class="legend-dot dot-cone-1"></span>&plusmn;1&sigma; (~68%)
+              <span class="legend-dot dot-cone-2"></span>&plusmn;2&sigma; (~95%)
+            </div>
+          </div>
+          <div id="predict-chart" class="chart"></div>
+          <p class="fine-print">A statistical projection derived from this contract's own implied volatility (expected move = price &times; IV &times; &radic;(days/365), the standard formula options platforms use), not a forecast of where the price will actually land -- the widening cone visualizes growing uncertainty over time, on purpose.</p>
+        </div>
       </div>
     </section>
 

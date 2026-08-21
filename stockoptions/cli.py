@@ -23,6 +23,7 @@ from stockoptions.data import (
     years_to_expiration,
 )
 from stockoptions.news import get_ticker_news
+from stockoptions.recommend import RecommendationError, recommend_trade
 from stockoptions.rates import get_yield_curve, risk_free_rate
 from stockoptions.strategies import breakevens, iron_condor, max_loss, max_profit, strangle, vertical_spread
 
@@ -200,8 +201,11 @@ def cmd_influencer(args: argparse.Namespace) -> None:
 
     try:
         if args.platform == "truth":
-            posts = get_truth_social_posts(args.handle, limit=args.limit)
+            posts = get_truth_social_posts(args.handle, limit=args.limit, include_top_comments=args.comments, top_comments_n=3)
         else:
+            if args.comments:
+                _fail("--comments is only supported for the 'truth' platform (X has no comment source here)", EXIT_BAD_INPUT)
+                return
             posts = get_x_posts(args.handle, limit=args.limit)
     except SocialFetchError as exc:
         _fail(str(exc), EXIT_DATA_ERROR)
@@ -217,10 +221,48 @@ def cmd_influencer(args: argparse.Namespace) -> None:
         posted = post.posted_at.strftime("%Y-%m-%d %H:%M UTC") if post.posted_at else "?"
         text = post.text if len(post.text) <= 100 else post.text[:97] + "..."
         table.add_row(posted, text)
+        for comment in post.top_comments:
+            ctext = comment.text if len(comment.text) <= 90 else comment.text[:87] + "..."
+            table.add_row("", f"  [dim]↳ @{comment.author} ({comment.favourites_count} likes): {ctext}[/dim]")
     console.print(table)
     console.print(
         "[dim]Unofficial, read-only scrape -- see social.py's module docstring for the real risk/reliability "
         "caveats before trusting this for anything more than casual browsing.[/dim]"
+    )
+
+
+def cmd_predict(args: argparse.Namespace) -> None:
+    try:
+        rec = recommend_trade(
+            args.ticker,
+            account_size=args.account_size,
+            max_risk_pct=args.risk_pct,
+            horizon_days=args.horizon,
+            target_delta=args.delta,
+        )
+    except RecommendationError as exc:
+        _fail(str(exc), EXIT_BAD_INPUT)
+        return
+
+    table = Table(title=f"{rec.ticker} trade recommendation")
+    table.add_column("metric")
+    table.add_column("value")
+    table.add_row("Current price", f"${rec.price:.2f}")
+    table.add_row("Model direction", f"{rec.direction} ({rec.live_probability:.1%} confidence)")
+    table.add_row("Backtest accuracy vs baseline", f"{rec.backtest.accuracy:.1%} vs {rec.backtest.majority_baseline_accuracy:.1%} ({'beats' if rec.backtest.beats_baseline else 'does NOT beat'})")
+    table.add_row("Suggested contract", f"{rec.ticker} {rec.contract.option_type} ${rec.contract.strike:.2f} exp {rec.contract.expiration} ({rec.contract.dte}d)")
+    table.add_row("Contract IV / delta", f"{rec.contract.iv:.1%} / {rec.contract.delta:.3f}")
+    table.add_row("Premium (per contract)", f"${rec.contract.premium:.2f} (${rec.contract.premium * 100:.2f}/contract)")
+    table.add_row("Empirical edge (Kelly)", f"win rate {rec.edge.win_rate:.1%}, f*={rec.edge.kelly_fraction:.1%} (n={rec.edge.sample_size})")
+    table.add_row("Recommended risk", f"{rec.recommended_risk_fraction:.2%} of account (${rec.recommended_dollar_risk:,.2f})")
+    table.add_row("Recommended size", f"{rec.recommended_contracts} contract(s) (${rec.actual_dollar_risk:,.2f})")
+    console.print(table)
+    for w in rec.warnings:
+        console.print(f"[yellow]![/yellow] {w}")
+    console.print(DISCLAIMER)
+    console.print(
+        "[dim]Sizing is a mechanical Kelly-criterion output fed a real but small-sample historical edge "
+        "estimate -- see recommend.py's module docstring for exactly what that does and doesn't guarantee.[/dim]"
     )
 
 
@@ -296,8 +338,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_influencer.add_argument("platform", choices=["truth", "x"])
     p_influencer.add_argument("handle", help='e.g. "realDonaldTrump" for Truth Social, "elonmusk" for X')
-    p_influencer.add_argument("--limit", type=int, default=10)
+    p_influencer.add_argument("--limit", type=int, default=20)
+    p_influencer.add_argument(
+        "--comments", action="store_true", help="also show each post's top-liked comments (truth only; needs TRUTHSOCIAL_USERNAME/PASSWORD in .env)"
+    )
     p_influencer.set_defaults(func=cmd_influencer)
+
+    p_predict = sub.add_parser(
+        "predict", help="a concrete trade suggestion: contract, expiration, and Kelly-sized position count (see README before trusting the sizing)"
+    )
+    p_predict.add_argument("ticker")
+    p_predict.add_argument("--account-size", type=float, default=10_000.0, dest="account_size")
+    p_predict.add_argument("--risk-pct", type=float, default=0.02, dest="risk_pct", help="max fraction of account to risk on this trade, e.g. 0.02 = 2%%")
+    p_predict.add_argument("--horizon", type=int, default=35, help="target days-to-expiration / forecast horizon / assumed holding period")
+    p_predict.add_argument("--delta", type=float, default=0.35, dest="delta", help="target |delta| for strike selection")
+    p_predict.set_defaults(func=cmd_predict)
 
     p_dashboard = sub.add_parser("dashboard", help="launch the local web dashboard")
     p_dashboard.add_argument("--host", default="127.0.0.1")

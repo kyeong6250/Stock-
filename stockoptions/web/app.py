@@ -26,7 +26,8 @@ from stockoptions.data import (
 )
 from stockoptions.news import get_ticker_news
 from stockoptions.rates import risk_free_rate
-from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts
+from stockoptions.recommend import RecommendationError, recommend_trade
+from stockoptions.social import SocialFetchError, get_truth_social_posts, get_x_posts, truth_social_has_credentials
 from stockoptions.strategies import (
     breakevens,
     default_scan_range,
@@ -214,14 +215,21 @@ INFLUENCER_WATCHLIST = [
 
 
 @app.get("/api/influencers")
-def api_influencers(limit: int = 5) -> list[dict]:
+def api_influencers(limit: int = 12) -> list[dict]:
     """Best-effort pull per figure -- one source failing (most likely: X,
-    see social.py's docstring) doesn't take down the others."""
+    see social.py's docstring) doesn't take down the others. Truth Social
+    entries include each post's top-liked comments when
+    TRUTHSOCIAL_USERNAME/PASSWORD are set (comment-pulling needs a login
+    even for a public post -- see social.py); silently omitted, not an
+    error, when they aren't, since posts themselves are still available."""
     results = []
+    with_comments = truth_social_has_credentials()
     for entry in INFLUENCER_WATCHLIST:
         try:
-            fetch = get_truth_social_posts if entry["platform"] == "truth" else get_x_posts
-            posts = fetch(entry["handle"], limit=limit)
+            if entry["platform"] == "truth":
+                posts = get_truth_social_posts(entry["handle"], limit=limit, include_top_comments=with_comments, top_comments_n=3)
+            else:
+                posts = get_x_posts(entry["handle"], limit=limit)
             results.append(
                 {
                     "platform": entry["platform"],
@@ -229,7 +237,20 @@ def api_influencers(limit: int = 5) -> list[dict]:
                     "label": entry["label"],
                     "available": True,
                     "posts": [
-                        {"text": p.text, "url": p.url, "postedAt": p.posted_at.isoformat() if p.posted_at else None}
+                        {
+                            "text": p.text,
+                            "url": p.url,
+                            "postedAt": p.posted_at.isoformat() if p.posted_at else None,
+                            "topComments": [
+                                {
+                                    "author": c.author,
+                                    "text": c.text,
+                                    "favouritesCount": c.favourites_count,
+                                    "url": c.url,
+                                }
+                                for c in p.top_comments
+                            ],
+                        }
                         for p in posts
                     ],
                 }
@@ -239,6 +260,60 @@ def api_influencers(limit: int = 5) -> list[dict]:
                 {"platform": entry["platform"], "handle": entry["handle"], "label": entry["label"], "available": False, "error": str(exc), "posts": []}
             )
     return results
+
+
+@app.get("/api/predict/{ticker}")
+def api_predict(
+    ticker: str,
+    account_size: float = Query(10_000.0),
+    risk_pct: float = Query(0.02),
+    horizon: int = Query(35),
+    delta: float = Query(0.35),
+) -> dict:
+    try:
+        rec = recommend_trade(ticker.upper(), account_size=account_size, max_risk_pct=risk_pct, horizon_days=horizon, target_delta=delta)
+    except (RecommendationError, TickerNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    return {
+        "ticker": rec.ticker,
+        "price": rec.price,
+        "direction": rec.direction,
+        "liveProbability": rec.live_probability,
+        "backtest": {
+            "accuracy": rec.backtest.accuracy,
+            "baseline": rec.backtest.majority_baseline_accuracy,
+            "beatsBaseline": rec.backtest.beats_baseline,
+        },
+        "contract": {
+            "expiration": rec.contract.expiration,
+            "dte": rec.contract.dte,
+            "optionType": rec.contract.option_type,
+            "strike": rec.contract.strike,
+            "premium": rec.contract.premium,
+            "iv": rec.contract.iv,
+            "delta": rec.contract.delta,
+        },
+        "edge": {
+            "sampleSize": rec.edge.sample_size,
+            "winRate": rec.edge.win_rate,
+            "avgWin": rec.edge.avg_win,
+            "avgLoss": rec.edge.avg_loss,
+            "kellyFraction": rec.edge.kelly_fraction,
+        },
+        "sizing": {
+            "kellyMultiplier": rec.kelly_multiplier,
+            "maxRiskPct": rec.max_risk_pct,
+            "riskFraction": rec.recommended_risk_fraction,
+            "dollarBudget": rec.recommended_dollar_risk,
+            "contracts": rec.recommended_contracts,
+            "actualDollarRisk": rec.actual_dollar_risk,
+        },
+        "cone": [
+            {"day": p.day, "upper1": p.upper_1sd, "lower1": p.lower_1sd, "upper2": p.upper_2sd, "lower2": p.lower_2sd} for p in rec.cone
+        ],
+        "warnings": rec.warnings,
+    }
 
 
 # Mounted last so it doesn't shadow the /api/* routes above.

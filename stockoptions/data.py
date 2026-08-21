@@ -51,7 +51,23 @@ def get_price_history(ticker: str, period: str = "1y", ttl: int = DEFAULT_TTL_SE
     """Daily OHLCV history, cached locally for `ttl` seconds."""
     cache_path = _cache_file(f"{ticker}_history_{period}.csv")
     if _cache_fresh(cache_path, ttl):
-        return pd.read_csv(cache_path, index_col=0, parse_dates=True)
+        df = pd.read_csv(cache_path, index_col=0)
+        # Not parse_dates=True at read_csv time: yfinance's own index is
+        # tz-aware in the exchange's local time, so a period spanning a
+        # DST transition (e.g. any 2y+ history) writes rows with two
+        # different UTC offsets (-04:00 EDT, -05:00 EST) into the same
+        # column. Live-caught while building recommend.py: pandas'
+        # read_csv silently fails to unify mixed offsets under
+        # parse_dates=True, leaving a plain string index instead of
+        # raising -- everything downstream that expected a DatetimeIndex
+        # (e.g. backtest.py's .strftime() on the date column) broke on a
+        # cache hit but worked fine on a fresh, uncached fetch, which is
+        # exactly the kind of silent-until-you're-unlucky bug worth a
+        # comment. utc=True explicitly unifies both offsets into one
+        # proper tz-aware DatetimeIndex instead of leaving pandas to
+        # guess (and fail).
+        df.index = pd.to_datetime(df.index, utc=True)
+        return df
 
     df = yf.Ticker(ticker).history(period=period)
     if df.empty:

@@ -56,7 +56,27 @@ def _max_drawdown(equity_curve: pd.Series) -> float:
     return float(drawdown.min())
 
 
-def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7) -> BacktestResult:
+@dataclass
+class BacktestRows:
+    """The raw per-day test-period data backtest() aggregates into a
+    BacktestResult -- exposed separately so other callers (recommend.py's
+    empirical position sizing) can compute their own statistics over the
+    same honestly-split, no-leakage test set instead of re-deriving the
+    train/test/purge logic themselves and risking it drifting out of sync
+    with backtest()'s own version."""
+
+    train_data: pd.DataFrame  # FEATURE_COLUMNS + "label" + "Close", training rows only
+    test_data: pd.DataFrame  # same columns, test rows only
+    predictions: np.ndarray  # model's 0/1 prediction for each test_data row, same order
+    forward_returns: pd.Series  # actual (Close[t+horizon]/Close[t] - 1) for each test_data row
+
+
+def backtest_rows(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7) -> BacktestRows:
+    """Trains on the purged-gap training window and predicts across the
+    held-out test window, returning the raw per-row data rather than
+    aggregate metrics. See backtest()'s docstring for the purge-gap
+    rationale (identical logic, factored out here so both functions share
+    one implementation)."""
     features = build_features(history)
     labels = build_labels(history, horizon_days)
     data = features.join(labels).join(history["Close"]).dropna()
@@ -81,12 +101,19 @@ def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float
 
     model = train(train_data[FEATURE_COLUMNS], train_data["label"])
     predictions = model.model.predict(test_data[FEATURE_COLUMNS])
+    forward_returns = test_data["Close"].shift(-horizon_days) / test_data["Close"] - 1
+
+    return BacktestRows(train_data=train_data, test_data=test_data, predictions=predictions, forward_returns=forward_returns)
+
+
+def backtest(history: pd.DataFrame, horizon_days: int = 5, train_fraction: float = 0.7) -> BacktestResult:
+    rows = backtest_rows(history, horizon_days, train_fraction)
+    train_data, test_data, predictions, forward_returns = rows.train_data, rows.test_data, rows.predictions, rows.forward_returns
 
     accuracy = float((predictions == test_data["label"].values).mean())
     majority_label = train_data["label"].mode().iloc[0]
     majority_baseline_accuracy = float((test_data["label"] == majority_label).mean())
 
-    forward_returns = test_data["Close"].shift(-horizon_days) / test_data["Close"] - 1
     strategy_returns = pd.Series(np.where(predictions == 1, forward_returns, 0.0), index=test_data.index).dropna()
 
     equity_curve = (1 + strategy_returns).cumprod()
