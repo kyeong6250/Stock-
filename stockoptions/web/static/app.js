@@ -233,7 +233,7 @@ function renderForecastChart(container, historyRows, cone, S) {
   const todayIdx = histN - 1;
   const totalN = histN + cone.length;
 
-  const allYs = [...historyRows.map((r) => r.close), ...cone.map((p) => p.lower2), ...cone.map((p) => p.upper2)];
+  const allYs = [...historyRows.map((r) => r.close), ...cone.map((p) => p.lower1), ...cone.map((p) => p.upper1)];
   const yMin = Math.min(...allYs);
   const yMax = Math.max(...allYs);
   const yPad = (yMax - yMin) * 0.08 || Math.abs(S) * 0.05 || 1;
@@ -263,8 +263,7 @@ function renderForecastChart(container, historyRows, cone, S) {
       .join(" ");
     return `${start} ${upper} ${lower} ${start}`;
   }
-  parts.push(`<polygon points="${band("upper2", "lower2")}" fill="#34d399" opacity="0.12" />`);
-  parts.push(`<polygon points="${band("upper1", "lower1")}" fill="#34d399" opacity="0.22" />`);
+  parts.push(`<polygon points="${band("upper1", "lower1")}" fill="#34d399" opacity="0.2" />`);
 
   parts.push(
     `<line x1="${xScale(todayIdx)}" y1="${yScale(S)}" x2="${coneX(cone[cone.length - 1].day)}" y2="${yScale(S)}" stroke="#8b978f" stroke-width="1.25" stroke-dasharray="4 3" />`
@@ -294,14 +293,14 @@ function renderForecastChart(container, historyRows, cone, S) {
         historyPath.style.strokeDashoffset = "0";
       });
     }
-    const polygons = container.querySelectorAll("svg polygon");
-    polygons.forEach((poly, i) => {
-      poly.style.opacity = "0";
-      poly.style.transition = `opacity 0.4s ease-out ${0.5 + i * 0.1}s`;
+    const band = container.querySelector("svg polygon");
+    if (band) {
+      band.style.opacity = "0";
+      band.style.transition = "opacity 0.4s ease-out 0.5s";
       requestAnimationFrame(() => {
-        poly.style.opacity = i === 0 ? "0.12" : "0.22";
+        band.style.opacity = "0.2";
       });
-    });
+    }
   }
 
   const tooltip = document.createElement("div");
@@ -325,11 +324,8 @@ function renderForecastChart(container, historyRows, cone, S) {
       lines = [`<div><span style="color:#60a5fa">&#9679;</span> Close: $${historyRows[i].close.toFixed(2)}</div>`];
     } else {
       const p = cone[i - todayIdx - 1];
-      label = `+${p.day}d`;
-      lines = [
-        `<div><span style="color:#34d399">&#9679;</span> &plusmn;1&sigma;: $${p.lower1.toFixed(2)} &ndash; $${p.upper1.toFixed(2)}</div>`,
-        `<div><span style="color:#34d399;opacity:.5">&#9679;</span> &plusmn;2&sigma;: $${p.lower2.toFixed(2)} &ndash; $${p.upper2.toFixed(2)}</div>`,
-      ];
+      label = `${p.day} day${p.day === 1 ? "" : "s"} from now`;
+      lines = [`<div><span style="color:#34d399">&#9679;</span> Likely range: $${p.lower1.toFixed(2)} &ndash; $${p.upper1.toFixed(2)}</div>`];
     }
     tooltip.innerHTML = `<div style="color:#8b978f;margin-bottom:4px;">${escapeHtml(label)}</div>${lines.join("")}`;
     tooltip.style.display = "block";
@@ -386,10 +382,21 @@ function renderPredictResult(rec, historyRows) {
     ? rec.warnings.map((w) => `<div class="predict-warning"><span class="predict-warning-icon">!</span><span>${escapeHtml(w)}</span></div>`).join("")
     : `<div class="predict-none-card">No sizing warnings triggered for this ticker/horizon -- still not a guarantee, just no flagged red light.</div>`;
 
-  document.getElementById("predict-direction").textContent = rec.direction === "up" ? "Bullish (call)" : "Bearish (put)";
+  const isUp = rec.direction === "up";
   const conf = confidenceLabel(rec.liveProbability);
-  document.getElementById("predict-confidence").innerHTML =
+  const verdictCard = document.getElementById("verdict-card");
+  verdictCard.classList.remove("bullish", "bearish");
+  verdictCard.classList.add(isUp ? "bullish" : "bearish");
+  document.getElementById("verdict-arrow").textContent = isUp ? "↑" : "↓";
+  document.getElementById("verdict-headline").textContent = isUp ? "Bullish" : "Bearish";
+  document.getElementById("verdict-confidence").innerHTML =
     `${(rec.liveProbability * 100).toFixed(1)}% model confidence<span class="confidence-chip ${conf.cls}">${escapeHtml(conf.text)}</span>`;
+
+  const c = rec.contract;
+  document.getElementById("verdict-plain").textContent =
+    rec.sizing.contracts > 0
+      ? `Suggested: buy ${rec.sizing.contracts} ${rec.ticker} $${c.strike.toFixed(0)} ${c.optionType}${rec.sizing.contracts === 1 ? "" : "s"}, expiring ${c.expiration} (~${money(rec.sizing.actualDollarRisk)} total).`
+      : `The math doesn't support risking real money on this trade right now -- recommended size is 0 contracts. See "Show the math" below for why.`;
 
   document.getElementById("predict-accuracy").textContent = `${(rec.backtest.accuracy * 100).toFixed(1)}% / ${(rec.backtest.baseline * 100).toFixed(1)}%`;
 
@@ -402,7 +409,6 @@ function renderPredictResult(rec, historyRows) {
   sizeCard.classList.remove("good", "neutral");
   sizeCard.classList.add(rec.sizing.contracts > 0 ? "good" : "neutral");
 
-  const c = rec.contract;
   document.getElementById("predict-contract").innerHTML = `
     <div><span class="meta-label">Contract</span><span class="meta-value">${escapeHtml(rec.ticker)} ${escapeHtml(c.optionType)} $${c.strike.toFixed(2)}</span></div>
     <div><span class="meta-label">Expiration</span><span class="meta-value">${escapeHtml(c.expiration)} (${c.dte}d)</span></div>

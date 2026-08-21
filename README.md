@@ -296,6 +296,20 @@ short of: not just "is this ticker's directional signal up or down," but
 "which specific contract, and how many." Two genuinely different kinds
 of claim get made here, and it matters which is which:
 
+The dashboard panel leads with one glanceable answer — a big up/down
+arrow, a plain-language confidence label, and one sentence describing
+the suggested trade — rather than a grid of stats competing for
+attention. Researched this deliberately: beginner-oriented trading apps
+consistently lead with a single clear signal and warn against the
+"analysis paralysis" a wall of indicators/numbers causes, and simple
+single-band price charts read far more easily than multi-band ones for
+a non-technical audience, which is why the projection chart now shows
+one shaded likely-range band instead of two overlapping ones. None of
+the rigor was deleted — backtest accuracy, the Kelly math, sample size,
+and full contract details are one click away behind "Show the math,"
+along with every warning (those stay visible unconditionally, not
+hidden behind anything, since they're the part most worth reading).
+
 **Real, reliable regardless of the signal's accuracy:**
 - **Contract selection** is standard practitioner mechanics: the
   expiration nearest a 30-45 day target (the conventional "theta high,

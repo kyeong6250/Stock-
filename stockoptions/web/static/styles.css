@@ -336,9 +336,6 @@ select {
 .legend-dot:first-child { margin-left: 0; }
 .dot-strategy { background: var(--accent); }
 .dot-hold { background: var(--blue); }
-.dot-cone-1 { background: var(--accent); opacity: 0.7; }
-.dot-cone-2 { background: var(--accent); opacity: 0.3; }
-
 .predict-warning {
   display: flex;
   gap: 10px;
@@ -361,6 +358,46 @@ select {
   color: var(--text-dim);
   margin-bottom: 10px;
 }
+
+/* ---------- predict verdict card ---------- */
+/* One glanceable answer -- direction, confidence, and a plain-English
+   sentence -- before any jargon or math. Researched while simplifying
+   this: beginner-oriented trading apps lead with a single clear
+   buy/sell-style signal, not a grid of stats competing for attention;
+   the detailed numbers move into a collapsed <details> section below
+   instead of disappearing, so the rigor is still there for anyone who
+   wants it. */
+.verdict-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+.verdict-card.bullish { border-color: rgba(52, 211, 153, 0.35); background: linear-gradient(135deg, var(--panel) 55%, var(--accent-soft)); }
+.verdict-card.bearish { border-color: rgba(248, 113, 113, 0.35); background: linear-gradient(135deg, var(--panel) 55%, rgba(248, 113, 113, 0.1)); }
+
+.verdict-arrow { font-size: 2.75rem; line-height: 1; flex-shrink: 0; }
+.verdict-card.bullish .verdict-arrow { color: var(--accent); }
+.verdict-card.bearish .verdict-arrow { color: var(--red); }
+
+.verdict-headline { font-size: 1.3rem; font-weight: 700; }
+.verdict-plain { font-size: 0.92rem; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
+
+.details-card summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  list-style: none;
+}
+.details-card summary::-webkit-details-marker { display: none; }
+.details-card summary::before { content: "▸ "; }
+.details-card[open] summary::before { content: "▾ "; }
+.details-card summary:hover { color: var(--text); }
 
 /* ---------- feature importance bars ---------- */
 /* Bar plot rather than a bare table -- horizontal bars make relative

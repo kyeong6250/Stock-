@@ -192,32 +192,32 @@
       <div id="predict-results" class="hidden">
         <div id="predict-warnings"></div>
 
-        <div class="stat-grid" id="predict-stat-grid">
-          <div class="stat-card stat-card-hero"><div class="stat-label">Direction</div><div class="stat-value" id="predict-direction">&mdash;</div><div class="stat-sub" id="predict-confidence"></div></div>
-          <div class="stat-card"><div class="stat-label">Backtest accuracy / baseline</div><div class="stat-value" id="predict-accuracy">&mdash;</div></div>
-          <div class="stat-card"><div class="stat-label">Empirical edge (Kelly f*)</div><div class="stat-value" id="predict-kelly">&mdash;</div><div class="stat-sub" id="predict-kelly-sub"></div></div>
-          <div class="stat-card" id="predict-size-card"><div class="stat-label">Recommended size</div><div class="stat-value" id="predict-size">&mdash;</div><div class="stat-sub" id="predict-size-sub"></div></div>
+        <div class="verdict-card" id="verdict-card">
+          <div class="verdict-arrow" id="verdict-arrow">&mdash;</div>
+          <div class="verdict-body">
+            <div class="verdict-headline" id="verdict-headline">&mdash;</div>
+            <div id="verdict-confidence"></div>
+            <div class="verdict-plain" id="verdict-plain">&mdash;</div>
+          </div>
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <h2>Suggested contract</h2>
-          </div>
-          <div class="meta-card" id="predict-contract"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h2>Price projection</h2>
-            <div class="legend">
-              <span class="legend-dot dot-cone-1"></span>&plusmn;1&sigma; (~68%)
-              <span class="legend-dot dot-cone-2"></span>&plusmn;2&sigma; (~95%)
-            </div>
-          </div>
+          <div class="card-head"><h2>Likely price range</h2></div>
           <div id="predict-chart" class="chart"></div>
-          <p class="fine-print">A statistical projection derived from this contract's own implied volatility (expected move = price &times; IV &times; &radic;(days/365), the standard formula options platforms use), not a forecast of where the price will actually land -- the widening cone visualizes growing uncertainty over time, on purpose.</p>
+          <p class="fine-print">The shaded band is where the price could realistically land, based on how much this option's own price already assumes the stock will move &mdash; not a forecast of exactly where it'll go. A wider band means more uncertainty, not a stronger or weaker signal.</p>
           <p class="as-of" id="predict-asof"></p>
         </div>
+
+        <details class="card details-card">
+          <summary>Show the math behind this recommendation</summary>
+          <div class="stat-grid" id="predict-stat-grid" style="margin-top: 16px;">
+            <div class="stat-card"><div class="stat-label">Backtest accuracy / baseline</div><div class="stat-value" id="predict-accuracy">&mdash;</div></div>
+            <div class="stat-card"><div class="stat-label">Empirical edge (Kelly f*)</div><div class="stat-value" id="predict-kelly">&mdash;</div><div class="stat-sub" id="predict-kelly-sub"></div></div>
+            <div class="stat-card" id="predict-size-card"><div class="stat-label">Recommended size</div><div class="stat-value" id="predict-size">&mdash;</div><div class="stat-sub" id="predict-size-sub"></div></div>
+          </div>
+          <div class="card-head" style="margin-top: 4px;"><h2>Contract details</h2></div>
+          <div class="meta-card" id="predict-contract"></div>
+        </details>
       </div>
     </section>
 
